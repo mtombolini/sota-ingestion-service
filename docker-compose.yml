@@ -25,7 +25,9 @@ services:
     build: .
     command: ["bash", "-lc", "alembic upgrade head && python scripts/seed_data.py && bash scripts/run_api.sh"]
     env_file:
-      - .env.example
+      - .env
+    environment:
+      PYTHONPATH: /app
     ports:
       - "8000:8000"
     depends_on:
@@ -37,7 +39,9 @@ services:
     build: .
     command: ["bash", "scripts/run_worker.sh"]
     env_file:
-      - .env.example
+      - .env
+    environment:
+      PYTHONPATH: /app
     depends_on:
       - db
       - redis

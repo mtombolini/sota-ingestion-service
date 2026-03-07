@@ -2,7 +2,8 @@ import hashlib
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
@@ -54,6 +55,8 @@ class IngestionService:
         if not run:
             raise ValueError("run not found")
         job = self.db.get(IntegrationJob, run.job_id)
+        tenant_id = job.tenant_id
+        job_type = job.job_type
         connection = self.db.get(IntegrationConnection, job.connection_id)
         connector = BsaleConnector(connection.base_url, connection.secret_ref or "mock-token")
 
@@ -65,34 +68,39 @@ class IngestionService:
             if job.job_type == "sync_product_catalog":
                 records = await connector.fetch_products()
                 run.records_raw = len(records)
-                run.records_normalized = self._persist_products(job.tenant_id, run.id, records)
-            elif job.job_type == "sync_stock_snapshot":
+                run.records_normalized = self._persist_products(tenant_id, run.id, records)
+            elif job_type == "sync_stock_snapshot":
                 records = await connector.fetch_stock()
                 run.records_raw = len(records)
-                run.records_normalized = self._persist_stock(job.tenant_id, run.id, records)
-            elif job.job_type == "sync_sales_documents":
+                run.records_normalized = self._persist_stock(tenant_id, run.id, records)
+            elif job_type == "sync_sales_documents":
                 records = await connector.fetch_sales_documents()
                 run.records_raw = len(records)
-                run.records_normalized = self._persist_sales(job.tenant_id, run.id, records)
-            elif job.job_type == "sync_branches":
+                run.records_normalized = self._persist_sales(tenant_id, run.id, records)
+            elif job_type == "sync_branches":
                 records = await connector.fetch_branches()
                 run.records_raw = len(records)
-                run.records_normalized = self._persist_branches(job.tenant_id, run.id, records)
+                run.records_normalized = self._persist_branches(tenant_id, run.id, records)
             else:
-                raise ValueError(f"unsupported job type {job.job_type}")
+                raise ValueError(f"unsupported job type {job_type}")
 
             run.status = "success"
             run.finished_at = datetime.utcnow()
             self.db.commit()
         except Exception as exc:
-            run.status = "failed"
-            run.finished_at = datetime.utcnow()
-            self.db.add(IntegrationError(tenant_id=job.tenant_id, job_run_id=run.id, object_name=job.job_type, message=str(exc)))
+            # Reset session state after failed flush/commit before writing failure metadata.
+            self.db.rollback()
+            run = self.db.get(IntegrationJobRun, run_id)
+            if run:
+                run.status = "failed"
+                run.finished_at = datetime.utcnow()
+            self.db.add(IntegrationError(tenant_id=tenant_id, job_run_id=run_id, object_name=job_type, message=str(exc)))
             self.db.commit()
-            logger.exception("job failed", extra={"run_id": run.id})
+            logger.exception("job failed", extra={"run_id": run_id})
 
     def _persist_raw(self, tenant_id: int, run_id: int, endpoint: str, payload: dict) -> None:
-        checksum = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        safe_payload = self._json_safe(payload)
+        checksum = hashlib.sha256(json.dumps(safe_payload, sort_keys=True).encode()).hexdigest()
         self.db.add(
             IntegrationRawObject(
                 tenant_id=tenant_id,
@@ -100,7 +108,7 @@ class IngestionService:
                 source_system="bsale",
                 endpoint=endpoint,
                 checksum=checksum,
-                payload=payload,
+                payload=safe_payload,
             )
         )
 
@@ -111,9 +119,23 @@ class IngestionService:
                 event_type=event_type,
                 aggregate_type=aggregate_type,
                 aggregate_id=aggregate_id,
-                payload=payload,
+                payload=self._json_safe(payload),
             )
         )
+
+    @staticmethod
+    def _json_safe(value):
+        if isinstance(value, dict):
+            return {k: IngestionService._json_safe(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [IngestionService._json_safe(v) for v in value]
+        if isinstance(value, tuple):
+            return [IngestionService._json_safe(v) for v in value]
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        if isinstance(value, Decimal):
+            return float(value)
+        return value
 
     def _persist_products(self, tenant_id: int, run_id: int, records: list[dict]) -> int:
         for rec in records:

@@ -11,25 +11,25 @@ def validate(access_token: str | None):
 
 
 @app.get("/v1/products.json")
-def products(access_token: str | None = Header(default=None)):
+def products(access_token: str | None = Header(default=None, convert_underscores=False)):
     validate(access_token)
     return {"items": PRODUCTS, "count": len(PRODUCTS)}
 
 
 @app.get("/v1/stocks.json")
-def stocks(access_token: str | None = Header(default=None)):
+def stocks(access_token: str | None = Header(default=None, convert_underscores=False)):
     validate(access_token)
     return {"items": STOCKS, "count": len(STOCKS)}
 
 
 @app.get("/v1/offices.json")
-def offices(access_token: str | None = Header(default=None)):
+def offices(access_token: str | None = Header(default=None, convert_underscores=False)):
     validate(access_token)
     return {"items": OFFICES, "count": len(OFFICES)}
 
 
 @app.get("/v1/documents/sales.json")
-def sales(access_token: str | None = Header(default=None)):
+def sales(access_token: str | None = Header(default=None, convert_underscores=False)):
     validate(access_token)
     return {"items": SALES, "count": len(SALES)}
 
