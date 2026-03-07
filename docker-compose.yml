@@ -1,0 +1,47 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: sota_ingestion
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  mock-bsale-api:
+    build: .
+    command: ["bash", "scripts/run_mock_bsale.sh"]
+    ports:
+      - "8010:8010"
+
+  app:
+    build: .
+    command: ["bash", "-lc", "alembic upgrade head && python scripts/seed_data.py && bash scripts/run_api.sh"]
+    env_file:
+      - .env.example
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
+      - mock-bsale-api
+
+  worker:
+    build: .
+    command: ["bash", "scripts/run_worker.sh"]
+    env_file:
+      - .env.example
+    depends_on:
+      - db
+      - redis
+      - app
+
+volumes:
+  postgres_data:
