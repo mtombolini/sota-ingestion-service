@@ -4,11 +4,11 @@ import logging
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from app.connectors.bsale import BsaleConnector
 from app.models import (
     Branch,
     IntegrationConnection,
@@ -22,7 +22,8 @@ from app.models import (
     SalesDocumentLine,
     StockSnapshot,
 )
-from app.normalizers.bsale import normalize_branch, normalize_product, normalize_sales_document, normalize_stock
+from app.providers import provider_registry
+from app.secrets import get_secret_store
 
 logger = logging.getLogger(__name__)
 
@@ -31,19 +32,30 @@ class IngestionService:
     def __init__(self, db: Session):
         self.db = db
 
-    def list_jobs(self) -> list[IntegrationJob]:
-        return list(self.db.scalars(select(IntegrationJob).order_by(IntegrationJob.id)).all())
+    def list_jobs(self, tenant_id: int | None = None) -> list[IntegrationJob]:
+        stmt = select(IntegrationJob)
+        if tenant_id is not None:
+            stmt = stmt.where(IntegrationJob.tenant_id == tenant_id)
+        return list(self.db.scalars(stmt.order_by(IntegrationJob.id)).all())
 
-    def list_runs(self, limit: int = 30) -> list[IntegrationJobRun]:
-        return list(self.db.scalars(select(IntegrationJobRun).order_by(desc(IntegrationJobRun.id)).limit(limit)).all())
+    def list_runs(self, limit: int = 30, tenant_id: int | None = None) -> list[IntegrationJobRun]:
+        stmt = select(IntegrationJobRun)
+        if tenant_id is not None:
+            stmt = stmt.join(IntegrationJob, IntegrationJob.id == IntegrationJobRun.job_id).where(IntegrationJob.tenant_id == tenant_id)
+        return list(self.db.scalars(stmt.order_by(desc(IntegrationJobRun.id)).limit(limit)).all())
 
-    def list_errors(self, limit: int = 30) -> list[IntegrationError]:
-        return list(self.db.scalars(select(IntegrationError).order_by(desc(IntegrationError.id)).limit(limit)).all())
+    def list_errors(self, limit: int = 30, tenant_id: int | None = None) -> list[IntegrationError]:
+        stmt = select(IntegrationError)
+        if tenant_id is not None:
+            stmt = stmt.where(IntegrationError.tenant_id == tenant_id)
+        return list(self.db.scalars(stmt.order_by(desc(IntegrationError.id)).limit(limit)).all())
 
-    def trigger_job(self, job_id: int) -> IntegrationJobRun:
+    def trigger_job(self, job_id: int, tenant_id: int | None = None) -> IntegrationJobRun:
         job = self.db.get(IntegrationJob, job_id)
         if not job:
             raise ValueError(f"job {job_id} not found")
+        if tenant_id is not None and job.tenant_id != tenant_id:
+            raise ValueError(f"job {job_id} not found for tenant {tenant_id}")
         run = IntegrationJobRun(job_id=job.id, correlation_id=str(uuid.uuid4()), status="queued")
         self.db.add(run)
         self.db.commit()
@@ -57,30 +69,31 @@ class IngestionService:
         job = self.db.get(IntegrationJob, run.job_id)
         tenant_id = job.tenant_id
         job_type = job.job_type
-        connection = self.db.get(IntegrationConnection, job.connection_id)
-        connector = BsaleConnector(connection.base_url, connection.secret_ref or "mock-token")
 
         run.status = "running"
         run.started_at = datetime.utcnow()
         self.db.commit()
 
         try:
+            connection = self.db.get(IntegrationConnection, job.connection_id)
+            provider = provider_registry.get(connection.provider)
+            connector = provider.build_runtime_connector(self.db, connection, secret_store=get_secret_store())
             if job.job_type == "sync_product_catalog":
-                records = await connector.fetch_products()
+                records = await provider.fetch_records(connector, job.job_type)
                 run.records_raw = len(records)
-                run.records_normalized = self._persist_products(tenant_id, run.id, records)
+                run.records_normalized = self._persist_products(tenant_id, run.id, records, provider=provider)
             elif job_type == "sync_stock_snapshot":
-                records = await connector.fetch_stock()
+                records = await provider.fetch_records(connector, job.job_type)
                 run.records_raw = len(records)
-                run.records_normalized = self._persist_stock(tenant_id, run.id, records)
+                run.records_normalized = self._persist_stock(tenant_id, run.id, records, provider=provider)
             elif job_type == "sync_sales_documents":
-                records = await connector.fetch_sales_documents()
+                records = await provider.fetch_records(connector, job.job_type)
                 run.records_raw = len(records)
-                run.records_normalized = self._persist_sales(tenant_id, run.id, records)
+                run.records_normalized = self._persist_sales(tenant_id, run.id, records, provider=provider)
             elif job_type == "sync_branches":
-                records = await connector.fetch_branches()
+                records = await provider.fetch_records(connector, job.job_type)
                 run.records_raw = len(records)
-                run.records_normalized = self._persist_branches(tenant_id, run.id, records)
+                run.records_normalized = self._persist_branches(tenant_id, run.id, records, provider=provider)
             else:
                 raise ValueError(f"unsupported job type {job_type}")
 
@@ -94,18 +107,29 @@ class IngestionService:
             if run:
                 run.status = "failed"
                 run.finished_at = datetime.utcnow()
-            self.db.add(IntegrationError(tenant_id=tenant_id, job_run_id=run_id, object_name=job_type, message=str(exc)))
+            self.db.add(
+                IntegrationError(
+                    tenant_id=tenant_id,
+                    job_run_id=run_id,
+                    object_name=job_type,
+                    message=str(exc),
+                    payload={
+                        "connection_id": job.connection_id,
+                        "provider": connection.provider if "connection" in locals() and connection is not None else None,
+                    },
+                )
+            )
             self.db.commit()
             logger.exception("job failed", extra={"run_id": run_id})
 
-    def _persist_raw(self, tenant_id: int, run_id: int, endpoint: str, payload: dict) -> None:
+    def _persist_raw(self, tenant_id: int, run_id: int, source_system: str, endpoint: str, payload: dict[str, Any]) -> None:
         safe_payload = self._json_safe(payload)
         checksum = hashlib.sha256(json.dumps(safe_payload, sort_keys=True).encode()).hexdigest()
         self.db.add(
             IntegrationRawObject(
                 tenant_id=tenant_id,
                 job_run_id=run_id,
-                source_system="bsale",
+                source_system=source_system,
                 endpoint=endpoint,
                 checksum=checksum,
                 payload=safe_payload,
@@ -137,10 +161,10 @@ class IngestionService:
             return float(value)
         return value
 
-    def _persist_products(self, tenant_id: int, run_id: int, records: list[dict]) -> int:
+    def _persist_products(self, tenant_id: int, run_id: int, records: list[dict], *, provider) -> int:
         for rec in records:
-            self._persist_raw(tenant_id, run_id, "products.json", rec)
-            n = normalize_product(rec)
+            self._persist_raw(tenant_id, run_id, provider.source_system(), provider.source_endpoint_for_job("sync_product_catalog"), rec)
+            n = provider.normalize("sync_product_catalog", rec)
             existing = self.db.scalar(select(Product).where(Product.tenant_id == tenant_id, Product.external_id == n["external_id"]))
             if existing:
                 for k, v in n.items():
@@ -151,10 +175,10 @@ class IngestionService:
         self.db.commit()
         return len(records)
 
-    def _persist_branches(self, tenant_id: int, run_id: int, records: list[dict]) -> int:
+    def _persist_branches(self, tenant_id: int, run_id: int, records: list[dict], *, provider) -> int:
         for rec in records:
-            self._persist_raw(tenant_id, run_id, "offices.json", rec)
-            n = normalize_branch(rec)
+            self._persist_raw(tenant_id, run_id, provider.source_system(), provider.source_endpoint_for_job("sync_branches"), rec)
+            n = provider.normalize("sync_branches", rec)
             existing = self.db.scalar(select(Branch).where(Branch.tenant_id == tenant_id, Branch.external_id == n["external_id"]))
             if existing:
                 for k, v in n.items():
@@ -165,19 +189,19 @@ class IngestionService:
         self.db.commit()
         return len(records)
 
-    def _persist_stock(self, tenant_id: int, run_id: int, records: list[dict]) -> int:
+    def _persist_stock(self, tenant_id: int, run_id: int, records: list[dict], *, provider) -> int:
         for rec in records:
-            self._persist_raw(tenant_id, run_id, "stocks.json", rec)
-            n = normalize_stock(rec)
+            self._persist_raw(tenant_id, run_id, provider.source_system(), provider.source_endpoint_for_job("sync_stock_snapshot"), rec)
+            n = provider.normalize("sync_stock_snapshot", rec)
             self.db.add(StockSnapshot(tenant_id=tenant_id, **n))
             self._emit_outbox(tenant_id, "stock.snapshot", "stock_snapshot", f"{n['product_external_id']}:{n['branch_external_id']}", n)
         self.db.commit()
         return len(records)
 
-    def _persist_sales(self, tenant_id: int, run_id: int, records: list[dict]) -> int:
+    def _persist_sales(self, tenant_id: int, run_id: int, records: list[dict], *, provider) -> int:
         for rec in records:
-            self._persist_raw(tenant_id, run_id, "documents/sales.json", rec)
-            n = normalize_sales_document(rec)
+            self._persist_raw(tenant_id, run_id, provider.source_system(), provider.source_endpoint_for_job("sync_sales_documents"), rec)
+            n = provider.normalize("sync_sales_documents", rec)
             existing = self.db.scalar(select(SalesDocument).where(SalesDocument.tenant_id == tenant_id, SalesDocument.external_id == n["external_id"]))
             if existing:
                 existing.issued_at = n["issued_at"]

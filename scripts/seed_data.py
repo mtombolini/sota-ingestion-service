@@ -15,9 +15,31 @@ def main():
 
         conn = db.scalar(select(IntegrationConnection).where(IntegrationConnection.tenant_id == tenant.id, IntegrationConnection.provider == "bsale"))
         if not conn:
-            conn = IntegrationConnection(tenant_id=tenant.id, provider="bsale", mode="mock", base_url="http://mock-bsale-api:8010/v1", secret_ref="mock-token")
+            conn = IntegrationConnection(
+                tenant_id=tenant.id,
+                provider="bsale",
+                name="Bsale principal",
+                mode="mock",
+                environment="mock",
+                base_url="http://mock-bsale-api:8010/v1",
+                secret_ref="mock-token",
+                status="mock",
+                is_primary=True,
+                priority=100,
+            )
             db.add(conn)
             db.flush()
+        else:
+            if not conn.name:
+                conn.name = "Bsale principal"
+            if not getattr(conn, "environment", None):
+                conn.environment = "mock" if conn.mode == "mock" else "production"
+            if not conn.status:
+                conn.status = "mock" if conn.mode == "mock" else "configured"
+            if not getattr(conn, "priority", None):
+                conn.priority = 100
+            if getattr(conn, "is_primary", None) is None:
+                conn.is_primary = True
 
         job_types = ["sync_product_catalog", "sync_stock_snapshot", "sync_sales_documents", "sync_branches"]
         existing = {j.job_type for j in db.scalars(select(IntegrationJob).where(IntegrationJob.tenant_id == tenant.id)).all()}

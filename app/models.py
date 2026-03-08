@@ -18,12 +18,23 @@ class Tenant(Base):
 
 class IntegrationConnection(Base):
     __tablename__ = "integration_connections"
+    __table_args__ = (UniqueConstraint("tenant_id", "provider", "name", name="uq_connection_name"),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)
     provider: Mapped[str] = mapped_column(String(50), index=True)
+    name: Mapped[str] = mapped_column(String(120), default="default")
     mode: Mapped[str] = mapped_column(String(10), default="mock")
+    environment: Mapped[str] = mapped_column(String(20), default="mock")
     base_url: Mapped[str] = mapped_column(String(300))
     secret_ref: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    provider_account_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    config_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(40), default="mock", index=True)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_check_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    last_check_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+    priority: Mapped[int] = mapped_column(Integer, default=100)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     tenant = relationship("Tenant")
 
@@ -54,6 +65,7 @@ class IntegrationMapping(Base):
     __tablename__ = "integration_mappings"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)
+    connection_id: Mapped[int | None] = mapped_column(ForeignKey("integration_connections.id"), nullable=True, index=True)
     provider: Mapped[str] = mapped_column(String(50), index=True)
     object_name: Mapped[str] = mapped_column(String(80), index=True)
     version: Mapped[str] = mapped_column(String(20), default="v1")
@@ -85,15 +97,29 @@ class IntegrationError(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
-class IntegrationWatermark(Base):
-    __tablename__ = "integration_watermarks"
-    __table_args__ = (UniqueConstraint("tenant_id", "provider", "object_name", name="uq_wm_scope"),)
+
+class IntegrationSecret(Base):
+    __tablename__ = "integration_secrets"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), index=True)
-    provider: Mapped[str] = mapped_column(String(50), index=True)
-    object_name: Mapped[str] = mapped_column(String(80), index=True)
-    last_cursor: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    tenant_id: Mapped[int | None] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
+    provider: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
+    secret_key: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    ciphertext: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AdminAuditLog(Base):
+    __tablename__ = "admin_audit_logs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int | None] = mapped_column(ForeignKey("tenants.id"), nullable=True, index=True)
+    actor: Mapped[str] = mapped_column(String(80), default="system")
+    action: Mapped[str] = mapped_column(String(80), index=True)
+    target_type: Mapped[str] = mapped_column(String(80), index=True)
+    target_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    target_label: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class IntegrationOutboxEvent(Base):

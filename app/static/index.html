@@ -1,0 +1,1326 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SotA Ingestion Control Plane</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    const UI_BUILD = '2026-03-08-control-plane'
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bp:      { DEFAULT: '#0B1120', card: '#0F1729', elevated: '#141E33', hover: '#1A2740' },
+            grid:    { DEFAULT: '#1B2B45', strong: '#243658' },
+            line:    { DEFAULT: '#2A4070', bright: '#3B5998' },
+            txt:     { DEFAULT: '#E8ECF2', soft: '#A0ADBF', muted: '#6B7F99', dim: '#3E5573' },
+            blue:    { DEFAULT: '#3B82F6', bright: '#60A5FA', soft: '#1E3A5F', border: '#2563EB', text: '#93C5FD' },
+            red:     { DEFAULT: '#EF4444', soft: '#2A1015', border: '#7F1D1D', text: '#FCA5A5' },
+            amber:   { DEFAULT: '#F59E0B', soft: '#2A2008', border: '#78350F', text: '#FCD34D' },
+            green:   { DEFAULT: '#22C55E', soft: '#0A2015', border: '#166534', text: '#86EFAC' },
+            cyan:    { DEFAULT: '#06B6D4', soft: '#082830', border: '#0E7490', text: '#67E8F9' },
+            white:   { DEFAULT: '#F1F5F9' },
+          },
+          fontFamily: {
+            sans: ['JetBrains Mono', 'Fira Code', 'monospace'],
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+          },
+        }
+      }
+    }
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    [x-cloak] { display: none !important; }
+    body {
+      background-color: #0B1120;
+      background-image:
+        linear-gradient(rgba(59,130,246,0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(59,130,246,0.06) 1px, transparent 1px),
+        radial-gradient(circle at top right, rgba(34,197,94,0.12), transparent 28%),
+        radial-gradient(circle at bottom left, rgba(6,182,212,0.10), transparent 24%);
+      background-size: 100px 100px, 100px 100px, auto, auto;
+    }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: #0B1120; }
+    ::-webkit-scrollbar-thumb { background: #2A4070; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3B5998; }
+    @keyframes spin-slow { to { transform: rotate(360deg); } }
+    .spin { animation: spin-slow 0.7s linear infinite; }
+    .glow { box-shadow: 0 0 10px rgba(59, 130, 246, 0.25), 0 0 3px rgba(59, 130, 246, 0.15); }
+    .glow-green { box-shadow: 0 0 12px rgba(34, 197, 94, 0.16); }
+    .glass { backdrop-filter: blur(10px); }
+    pre { white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body
+  class="min-h-screen font-mono text-txt antialiased"
+  x-data="app()"
+  x-init="init()"
+  x-cloak
+  x-effect="activeTab === 'data' && loadDataTab(activeDataTab)"
+>
+  <header class="sticky top-0 z-30 border-b border-grid bg-bp-card/90 glass">
+    <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+      <div class="flex items-center gap-3">
+        <div class="flex h-9 w-9 items-center justify-center rounded border border-line bg-blue-soft">
+          <svg class="h-5 w-5 text-blue-bright" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M4 12h10M4 17h16"/>
+          </svg>
+        </div>
+        <div>
+          <p class="text-xs uppercase tracking-[0.28em] text-txt-dim">Control Plane</p>
+          <p class="text-sm font-semibold uppercase tracking-[0.18em] text-white">SotA Ingestion</p>
+        </div>
+        <span class="hidden rounded border border-grid bg-bp px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-txt-soft sm:inline-block" x-text="uiBuild"></span>
+        <span class="inline-flex items-center gap-1.5 rounded border px-2.5 py-1 text-xs font-medium"
+          :class="health && health.status === 'ok' ? 'border-green-border bg-green-soft text-green-text glow-green' : 'border-red-border bg-red-soft text-red-text'">
+          <span class="h-1.5 w-1.5 rounded-full" :class="health && health.status === 'ok' ? 'bg-green' : 'bg-red'"></span>
+          <span x-text="health && health.status === 'ok' ? 'ONLINE' : (health ? health.status : 'BOOTING')"></span>
+        </span>
+      </div>
+      <div class="flex items-center gap-2">
+        <button @click="toggleAutoRefresh()"
+          class="rounded border px-3 py-1.5 text-xs font-medium uppercase tracking-wide transition-all"
+          :class="autoRefresh ? 'border-blue-border bg-blue-soft text-blue-text glow' : 'border-grid bg-bp-card text-txt-muted hover:border-line hover:text-txt-soft'">
+          <span x-text="autoRefresh ? 'Auto 5s' : 'Manual'"></span>
+        </button>
+        <button @click="refresh()" :disabled="loading"
+          class="rounded border border-grid bg-bp-card px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft disabled:opacity-40">
+          <span class="flex items-center gap-1.5">
+            <svg class="h-3.5 w-3.5" :class="loading && 'spin'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+            <span>Refresh</span>
+          </span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <section class="border-b border-grid bg-bp-card/40 px-4 py-4 sm:px-6">
+    <div class="mx-auto grid max-w-7xl gap-4 lg:grid-cols-[1.4fr_1fr]">
+      <div class="rounded-xl border border-grid bg-bp-card/70 p-4">
+        <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Cuenta activa</p>
+        <div class="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p class="text-lg font-semibold text-white" x-text="currentTenant ? currentTenant.name : 'Sin cuentas configuradas'"></p>
+            <p class="text-xs text-txt-muted" x-text="currentTenant ? currentTenant.slug : 'Crea o siembra un tenant para operar el panel.'"></p>
+          </div>
+          <label class="flex min-w-[280px] flex-col gap-1 text-xs uppercase tracking-wide text-txt-dim">
+            <span>Seleccionar cuenta</span>
+            <select x-model="selectedTenantId" @change="changeTenant(selectedTenantId)"
+              class="rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20">
+              <option value="" x-show="tenants.length === 0">Sin tenants</option>
+              <template x-for="tenant in tenants" :key="tenant.id">
+                <option :value="tenant.id" x-text="`${tenant.name} (${tenant.slug})`"></option>
+              </template>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div class="rounded-xl border border-grid bg-bp-card/70 p-4" x-show="overview">
+        <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Pulso operativo</p>
+        <div class="mt-3 grid grid-cols-2 gap-3 text-xs">
+          <div class="rounded border border-grid bg-bp px-3 py-2">
+            <p class="text-txt-dim">Conexiones</p>
+            <p class="mt-1 text-lg font-semibold text-white" x-text="overview?.totals?.connections_total ?? 0"></p>
+          </div>
+          <div class="rounded border border-grid bg-bp px-3 py-2">
+            <p class="text-txt-dim">Saludables</p>
+            <p class="mt-1 text-lg font-semibold text-green-text" x-text="overview?.totals?.connections_healthy ?? 0"></p>
+          </div>
+          <div class="rounded border border-grid bg-bp px-3 py-2">
+            <p class="text-txt-dim">Jobs activos</p>
+            <p class="mt-1 text-lg font-semibold text-blue-text" x-text="overview?.totals?.jobs_enabled ?? 0"></p>
+          </div>
+          <div class="rounded border border-grid bg-bp px-3 py-2">
+            <p class="text-txt-dim">Outbox pendiente</p>
+            <p class="mt-1 text-lg font-semibold text-amber-text" x-text="overview?.totals?.outbox_pending ?? 0"></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <nav class="border-b border-grid bg-bp-card/30 px-4 py-3 sm:px-6">
+    <div class="mx-auto flex max-w-7xl flex-wrap gap-1 rounded-lg border border-grid bg-bp p-1">
+      <template x-for="tab in tabs" :key="tab.id">
+        <button @click="activeTab = tab.id"
+          class="flex items-center gap-1.5 rounded px-3.5 py-2 text-xs font-medium uppercase tracking-wide transition-all"
+          :class="activeTab === tab.id ? 'border border-blue-border bg-blue-soft text-blue-bright glow' : 'text-txt-muted hover:text-txt-soft'">
+          <span x-text="tab.label"></span>
+          <span x-show="tab.badge !== null" class="rounded border px-1.5 py-0.5 text-[10px]"
+            :class="tab.badgeClass ?? 'border-grid bg-bp text-txt-muted'" x-text="tab.badge"></span>
+        </button>
+      </template>
+    </div>
+  </nav>
+
+  <main class="mx-auto max-w-7xl px-4 py-5 sm:px-6">
+    <section x-show="!selectedTenantId" class="rounded-xl border border-grid bg-bp-card px-6 py-16 text-center text-sm text-txt-muted">
+      Selecciona una cuenta para cargar el plano operativo.
+    </section>
+
+    <section x-show="selectedTenantId && activeTab === 'overview'" class="space-y-5">
+      <div class="grid gap-4 xl:grid-cols-[1.35fr_1fr]">
+        <div class="rounded-2xl border border-grid bg-bp-card p-5">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Topologia</p>
+              <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-white">Mapa de integraciones</h2>
+              <p class="mt-2 max-w-2xl text-xs leading-relaxed text-txt-muted">Cada tarjeta representa una conexion concreta del tenant con un provider. El estado mezcla configuracion, ultimo check, jobs habilitados, corridas y errores recientes.</p>
+            </div>
+            <button type="button" @click="activeTab = 'connectors'"
+              class="rounded border border-blue-border bg-blue-soft px-3 py-2 text-xs font-semibold uppercase tracking-wide text-blue-text transition-all hover:bg-blue/15">
+              Administrar conexiones
+            </button>
+          </div>
+          <div class="mt-5 grid gap-3 md:grid-cols-2">
+            <template x-for="item in (overview?.providers ?? [])" :key="item.connection_id">
+              <div class="rounded-xl border border-grid bg-bp p-4 transition-all hover:border-line">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class="text-sm font-semibold text-white" x-text="item.name"></span>
+                      <span class="rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                        :class="connectionStatusClass(item.status)" x-text="connectionStatusLabel(item.status)"></span>
+                      <span x-show="item.is_primary" class="rounded border border-cyan-border bg-cyan-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-text">primary</span>
+                    </div>
+                    <p class="mt-1 text-xs text-txt-muted">
+                      <span x-text="item.provider_label"></span>
+                      <span class="text-grid-strong">·</span>
+                      <span x-text="item.environment"></span>
+                    </p>
+                  </div>
+                  <button type="button" @click="openConnectionEditor(item.connection_id)"
+                    class="rounded border border-grid px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
+                    Editar
+                  </button>
+                </div>
+                <div class="mt-4 grid grid-cols-2 gap-2 text-xs">
+                  <div class="rounded border border-grid bg-bp-card px-3 py-2">
+                    <p class="text-txt-dim">Jobs</p>
+                    <p class="mt-1 font-semibold text-white"><span x-text="item.jobs_enabled"></span>/<span x-text="item.jobs_total"></span></p>
+                  </div>
+                  <div class="rounded border border-grid bg-bp-card px-3 py-2">
+                    <p class="text-txt-dim">Errores</p>
+                    <p class="mt-1 font-semibold" :class="item.recent_error_count > 0 ? 'text-red-text' : 'text-green-text'" x-text="item.recent_error_count"></p>
+                  </div>
+                </div>
+                <div class="mt-3 flex flex-wrap gap-2 text-[11px] text-txt-muted">
+                  <span>ultimo run: <span class="text-txt-soft" x-text="item.last_run_status ?? 'sin datos'"></span></span>
+                  <span class="text-grid-strong">·</span>
+                  <span>ultima sync: <span class="text-txt-soft" x-text="fmtDateTime(item.last_sync_at)"></span></span>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <div class="rounded-2xl border border-grid bg-bp-card p-5">
+          <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Providers</p>
+          <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-white">Catalogo registrado</h2>
+          <div class="mt-4 space-y-3">
+            <template x-for="provider in providers" :key="provider.key">
+              <div class="rounded-xl border border-grid bg-bp p-4">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-semibold text-white" x-text="provider.display_name"></p>
+                    <p class="mt-1 text-xs leading-relaxed text-txt-muted" x-text="provider.description"></p>
+                  </div>
+                  <span class="rounded border border-grid bg-bp-card px-2 py-1 text-[10px] uppercase tracking-wide text-txt-soft" x-text="provider.key"></span>
+                </div>
+                <div class="mt-3 flex flex-wrap gap-1.5">
+                  <template x-for="job in provider.jobs" :key="job.job_type">
+                    <span class="rounded border border-grid bg-bp-card px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-txt-soft" x-text="job.label"></span>
+                  </template>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section x-show="selectedTenantId && activeTab === 'connectors'" class="space-y-5">
+      <div class="grid gap-5 xl:grid-cols-[1.05fr_1.25fr]">
+        <div class="rounded-2xl border border-grid bg-bp-card p-5">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Onboarding</p>
+              <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-white">Nueva conexion</h2>
+              <p class="mt-2 text-xs leading-relaxed text-txt-muted">Crea una nueva conexion por tenant y provider. El alta crea la conexion y provisiona los jobs. La activacion operacional se maneja despues, desde la tarjeta de la conexion.</p>
+            </div>
+            <button type="button" @click="createOpen = !createOpen; syncCreateDefaults(true)"
+              class="rounded border px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-all"
+              :class="createOpen ? 'border-blue-border bg-blue-soft text-blue-text glow' : 'border-grid bg-bp text-txt-muted hover:border-line hover:text-txt-soft'">
+              <span x-text="createOpen ? 'Ocultar' : 'Crear conexion'"></span>
+            </button>
+          </div>
+
+          <div x-show="createOpen" x-transition class="mt-5 space-y-4 rounded-xl border border-line bg-bp p-4">
+            <div class="grid gap-3 md:grid-cols-2">
+              <label class="text-xs uppercase tracking-wide text-txt-dim">
+                <span class="mb-1 block">Provider</span>
+                <select x-model="createConn.provider" @change="syncCreateDefaults(true)"
+                  class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20">
+                  <template x-for="provider in providers" :key="provider.key">
+                    <option :value="provider.key" x-text="provider.display_name"></option>
+                  </template>
+                </select>
+              </label>
+              <label class="text-xs uppercase tracking-wide text-txt-dim">
+                <span class="mb-1 block">Modo</span>
+                <select x-model="createConn.mode" @change="syncCreateDefaults(true)"
+                  class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20">
+                  <option value="mock">mock</option>
+                  <option value="real">real</option>
+                </select>
+              </label>
+            </div>
+            <div class="grid gap-3 md:grid-cols-2">
+              <label class="text-xs uppercase tracking-wide text-txt-dim">
+                <span class="mb-1 block">Nombre</span>
+                <input x-model="createConn.name" type="text" placeholder="Bsale principal"
+                  class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
+              </label>
+              <label class="text-xs uppercase tracking-wide text-txt-dim">
+                <span class="mb-1 block">Entorno</span>
+                <select x-model="createConn.environment"
+                  class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20">
+                  <template x-for="env in createProviderEnvironments()" :key="env">
+                    <option :value="env" x-text="env"></option>
+                  </template>
+                </select>
+              </label>
+            </div>
+            <label class="block text-xs uppercase tracking-wide text-txt-dim">
+              <span class="mb-1 block">Base URL</span>
+              <input x-model="createConn.base_url" type="url"
+                class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
+            </label>
+            <label class="block text-xs uppercase tracking-wide text-txt-dim" x-show="createConn.mode === 'real'">
+              <span class="mb-1 block">API Token</span>
+              <input x-model="createConn.api_key" type="password" placeholder="Opcional al crear; puedes cargarlo despues"
+                class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
+            </label>
+            <label class="flex items-center gap-2 rounded border border-grid bg-bp px-3 py-2 text-xs text-txt-soft">
+              <input x-model="createConn.is_primary" type="checkbox" class="h-4 w-4 rounded border-grid bg-bp text-blue focus:ring-blue" />
+              <span>Marcar como conexion primaria del provider para esta cuenta</span>
+            </label>
+            <div class="flex flex-wrap items-center gap-2">
+              <button type="button" @click="createConnection()" :disabled="creatingConnection"
+                class="rounded border border-blue-border bg-blue-soft px-4 py-2 text-xs font-semibold uppercase tracking-wide text-blue-text transition-all hover:bg-blue/15 disabled:opacity-40">
+                <span x-text="creatingConnection ? 'Creando...' : 'Crear conexion'"></span>
+              </button>
+              <button type="button" @click="resetCreateForm()"
+                class="rounded border border-grid px-3 py-2 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
+                Limpiar
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="rounded-2xl border border-grid bg-bp-card p-5">
+          <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Providers disponibles</p>
+          <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-white">Registry</h2>
+          <div class="mt-4 space-y-3">
+            <template x-for="provider in providers" :key="provider.key">
+              <div class="rounded-xl border border-grid bg-bp p-4">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm font-semibold text-white" x-text="provider.display_name"></span>
+                      <span class="rounded border border-grid bg-bp-card px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-txt-soft" x-text="provider.key"></span>
+                    </div>
+                    <p class="mt-1 text-xs leading-relaxed text-txt-muted" x-text="provider.description"></p>
+                  </div>
+                  <a :href="provider.docs_url" target="_blank" rel="noreferrer" x-show="provider.docs_url"
+                    class="rounded border border-grid px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
+                    Docs
+                  </a>
+                </div>
+                <div class="mt-3 grid gap-2 md:grid-cols-2">
+                  <div class="rounded border border-grid bg-bp-card px-3 py-2 text-xs">
+                    <p class="text-txt-dim">Default mock</p>
+                    <p class="mt-1 break-all text-txt-soft" x-text="provider.default_base_urls.mock"></p>
+                  </div>
+                  <div class="rounded border border-grid bg-bp-card px-3 py-2 text-xs">
+                    <p class="text-txt-dim">Default real</p>
+                    <p class="mt-1 break-all text-txt-soft" x-text="provider.default_base_urls.real"></p>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <div class="space-y-4">
+        <template x-for="conn in connectors" :key="conn.id">
+          <div class="rounded-2xl border border-grid bg-bp-card p-5 transition-all hover:border-line">
+            <div class="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="text-lg font-semibold text-white" x-text="conn.name"></span>
+                  <span class="rounded border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide"
+                    :class="connectionStatusClass(conn.status)" x-text="connectionStatusLabel(conn.status)"></span>
+                  <span class="rounded border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide"
+                    :class="conn.mode === 'mock' ? 'border-amber-border bg-amber-soft text-amber-text' : 'border-blue-border bg-blue-soft text-blue-text'"
+                    x-text="conn.mode"></span>
+                  <span class="rounded border border-grid bg-bp px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-txt-soft" x-text="conn.environment"></span>
+                  <span x-show="conn.is_primary" class="rounded border border-cyan-border bg-cyan-soft px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-text">primary</span>
+                </div>
+                <p class="mt-2 text-xs uppercase tracking-[0.24em] text-txt-dim">
+                  <span x-text="conn.provider_label"></span>
+                  <span class="text-grid-strong"> / </span>
+                  <span x-text="conn.provider"></span>
+                </p>
+                <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div class="rounded-xl border border-grid bg-bp p-3 text-xs">
+                    <p class="text-txt-dim">Base URL</p>
+                    <p class="mt-1 break-all text-txt-soft" x-text="conn.base_url"></p>
+                  </div>
+                  <div class="rounded-xl border border-grid bg-bp p-3 text-xs">
+                    <p class="text-txt-dim">Cuenta provider</p>
+                    <p class="mt-1 text-txt-soft" x-text="conn.provider_account_id ?? 'sin identificar'"></p>
+                  </div>
+                  <div class="rounded-xl border border-grid bg-bp p-3 text-xs">
+                    <p class="text-txt-dim">Jobs</p>
+                    <p class="mt-1 text-white"><span class="font-semibold" x-text="conn.jobs_enabled"></span>/<span x-text="conn.jobs_total"></span></p>
+                  </div>
+                  <div class="rounded-xl border border-grid bg-bp p-3 text-xs">
+                    <p class="text-txt-dim">Ultima sync</p>
+                    <p class="mt-1 text-txt-soft" x-text="fmtDateTime(conn.last_sync_at)"></p>
+                  </div>
+                </div>
+
+                <div x-show="conn.last_check_message" class="mt-4 rounded-xl border px-3 py-3 text-xs"
+                  :class="conn.last_check_ok ? 'border-green-border bg-green-soft text-green-text' : (conn.status === 'config_incomplete' ? 'border-amber-border bg-amber-soft text-amber-text' : 'border-red-border bg-red-soft text-red-text')">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="font-semibold uppercase tracking-wide">Ultimo check</span>
+                    <span class="text-[10px] opacity-70" x-text="fmtDateTime(conn.last_checked_at)"></span>
+                  </div>
+                  <p class="mt-1" x-text="conn.last_check_message"></p>
+                </div>
+
+                <div class="mt-4 rounded-xl border border-grid bg-bp p-4">
+                  <div class="flex items-center justify-between gap-3">
+                    <div>
+                      <p class="text-[11px] uppercase tracking-[0.24em] text-txt-dim">Onboarding</p>
+                      <p class="mt-1 text-xs text-txt-soft">Progreso operativo: <span class="font-semibold text-white" x-text="`${conn.onboarding.progress}%`"></span></p>
+                    </div>
+                    <span class="rounded border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide"
+                      :class="conn.onboarding.ready ? 'border-green-border bg-green-soft text-green-text' : 'border-amber-border bg-amber-soft text-amber-text'"
+                      x-text="conn.onboarding.ready ? 'ready' : (conn.onboarding.next_action ?? 'pending')"></span>
+                  </div>
+                  <div class="mt-3 h-2 rounded-full bg-bp-card">
+                    <div class="h-2 rounded-full transition-all" :class="progressClass(conn.onboarding.progress)" :style="`width:${conn.onboarding.progress}%`"></div>
+                  </div>
+                  <div class="mt-3 grid gap-2 md:grid-cols-2">
+                    <template x-for="step in conn.onboarding.steps" :key="step.key">
+                      <div class="rounded border px-3 py-2 text-xs"
+                        :class="step.done ? 'border-green-border bg-green-soft/60 text-green-text' : 'border-grid bg-bp-card text-txt-muted'">
+                        <div class="flex items-center justify-between gap-2">
+                          <span class="font-semibold uppercase tracking-wide" x-text="step.label"></span>
+                          <span x-text="step.done ? 'ok' : 'pendiente'"></span>
+                        </div>
+                        <p class="mt-1 leading-relaxed" x-text="step.detail"></p>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </div>
+
+              <div class="w-full xl:w-[320px] xl:flex-shrink-0">
+                <div class="rounded-xl border border-grid bg-bp p-4">
+                  <p class="text-[11px] uppercase tracking-[0.24em] text-txt-dim">Acciones</p>
+                  <div class="mt-3 grid grid-cols-2 gap-2">
+                    <button type="button" @click="openConnectionEditor(conn.id)"
+                      class="rounded border border-blue-border bg-blue-soft px-3 py-2 text-xs font-semibold uppercase tracking-wide text-blue-text transition-all hover:bg-blue/15">
+                      Configurar
+                    </button>
+                    <button type="button" @click="saveAndCheckConnection(conn.id)" :disabled="switchingMode[conn.id]"
+                      class="rounded border border-green-border bg-green-soft px-3 py-2 text-xs font-semibold uppercase tracking-wide text-green-text transition-all hover:bg-green/10 disabled:opacity-40">
+                      Probar
+                    </button>
+                    <button type="button" @click="makePrimary(conn.id)" :disabled="conn.is_primary || switchingMode[conn.id]"
+                      class="rounded border border-cyan-border bg-cyan-soft px-3 py-2 text-xs font-semibold uppercase tracking-wide text-cyan-text transition-all hover:bg-cyan/10 disabled:opacity-40">
+                      Primaria
+                    </button>
+                    <button type="button" @click="toggleJobsForConnection(conn)" :disabled="switchingMode[conn.id]"
+                      class="rounded border border-amber-border bg-amber-soft px-3 py-2 text-xs font-semibold uppercase tracking-wide text-amber-text transition-all hover:bg-amber/10 disabled:opacity-40"
+                      x-text="conn.jobs_enabled === conn.jobs_total && conn.jobs_total > 0 ? 'Desactivar jobs' : 'Activar jobs'"></button>
+                    <button type="button" @click="queueConnectionSync(conn.id)" :disabled="switchingMode[conn.id]"
+                      class="col-span-2 rounded border border-grid bg-bp-card px-3 py-2 text-xs font-semibold uppercase tracking-wide text-txt-soft transition-all hover:border-line hover:text-white disabled:opacity-40">
+                      Sync inicial
+                    </button>
+                    <button type="button" @click="switchConnectionToMock(conn)" :disabled="conn.mode === 'mock' || switchingMode[conn.id]"
+                      class="col-span-2 rounded border border-grid bg-bp px-3 py-2 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft disabled:opacity-40">
+                      Volver a mock
+                    </button>
+                  </div>
+                  <div class="mt-4 rounded border border-grid bg-bp-card px-3 py-2 text-[11px] text-txt-muted">
+                    <p>errores recientes: <span class="font-semibold" :class="conn.recent_error_count > 0 ? 'text-red-text' : 'text-green-text'" x-text="conn.recent_error_count"></span></p>
+                    <p class="mt-1">runs ok: <span class="text-green-text" x-text="conn.successful_runs"></span> · failed: <span class="text-red-text" x-text="conn.failed_runs"></span></p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div x-show="openConns[conn.id]" x-transition class="mt-5 rounded-2xl border border-line bg-bp p-5">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p class="text-[11px] uppercase tracking-[0.24em] text-txt-dim">Editor de conexion</p>
+                  <p class="mt-1 text-xs text-txt-muted">Guardar persiste configuracion. Probar hace un `check` real contra el provider. Si el token queda vacio, se conserva el valor guardado.</p>
+                </div>
+                <button type="button" @click="openConns = { ...openConns, [conn.id]: false }"
+                  class="rounded border border-grid px-3 py-2 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
+                  Cerrar
+                </button>
+              </div>
+              <div class="mt-4 grid gap-3 lg:grid-cols-2">
+                <label class="text-xs uppercase tracking-wide text-txt-dim">
+                  <span class="mb-1 block">Nombre</span>
+                  <input x-model="connName[conn.id]" type="text"
+                    class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
+                </label>
+                <label class="text-xs uppercase tracking-wide text-txt-dim">
+                  <span class="mb-1 block">Modo</span>
+                  <select x-model="connMode[conn.id]" @change="syncConnectionDefaults(conn.id, conn.provider, true)"
+                    class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20">
+                    <option value="mock">mock</option>
+                    <option value="real">real</option>
+                  </select>
+                </label>
+                <label class="text-xs uppercase tracking-wide text-txt-dim">
+                  <span class="mb-1 block">Entorno</span>
+                  <select x-model="connEnv[conn.id]"
+                    class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20">
+                    <template x-for="env in providerEnvironments(conn.provider)" :key="env">
+                      <option :value="env" x-text="env"></option>
+                    </template>
+                  </select>
+                </label>
+                <label class="text-xs uppercase tracking-wide text-txt-dim">
+                  <span class="mb-1 block">Base URL</span>
+                  <input x-model="connUrl[conn.id]" type="url"
+                    class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
+                </label>
+              </div>
+              <label class="mt-3 block text-xs uppercase tracking-wide text-txt-dim" x-show="connMode[conn.id] === 'real'">
+                <span class="mb-1 block">API Token</span>
+                <input x-model="connTok[conn.id]" type="password" placeholder="Deja vacio para conservar el secreto actual"
+                  class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
+              </label>
+              <div class="mt-4 flex flex-wrap items-center gap-2">
+                <button type="button" @click="saveConnectionConfig(conn.id)" :disabled="switchingMode[conn.id]"
+                  class="rounded border border-blue-border bg-blue-soft px-4 py-2 text-xs font-semibold uppercase tracking-wide text-blue-text transition-all hover:bg-blue/15 disabled:opacity-40">
+                  Guardar configuracion
+                </button>
+                <button type="button" @click="saveAndCheckConnection(conn.id)" :disabled="switchingMode[conn.id]"
+                  class="rounded border border-green-border bg-green-soft px-4 py-2 text-xs font-semibold uppercase tracking-wide text-green-text transition-all hover:bg-green/10 disabled:opacity-40">
+                  Guardar y probar
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <div x-show="connectors.length === 0" class="rounded-xl border border-grid bg-bp-card px-6 py-16 text-center text-sm text-txt-muted">
+          Esta cuenta aun no tiene conexiones configuradas.
+        </div>
+      </div>
+    </section>
+
+    <section x-show="selectedTenantId && activeTab === 'jobs'" class="space-y-3">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Ejecucion</p>
+          <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-white">Jobs provisionados</h2>
+          <p class="mt-2 text-xs text-txt-muted">Los jobs ahora cuelgan de una conexion concreta. Puedes tener multiples conexiones del mismo provider dentro de la misma cuenta sin mezclar ejecuciones.</p>
+        </div>
+        <button type="button" @click="triggerAll()" :disabled="Object.values(triggering).some(Boolean)"
+          class="rounded border border-grid bg-bp-card px-4 py-2 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft disabled:opacity-40">
+          Run all habilitados
+        </button>
+      </div>
+
+      <div class="grid gap-3 lg:grid-cols-2">
+        <template x-for="job in jobs" :key="job.id">
+          <div class="rounded-xl border border-grid bg-bp-card p-4 transition-all hover:border-line">
+            <div class="flex items-start justify-between gap-4">
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="text-sm font-semibold text-white" x-text="job.job_label"></span>
+                  <span class="rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                    :class="job.is_enabled ? 'border-green-border bg-green-soft text-green-text' : 'border-grid bg-bp text-txt-dim'"
+                    x-text="job.is_enabled ? 'enabled' : 'disabled'"></span>
+                </div>
+                <p class="mt-1 text-xs text-txt-muted"><span x-text="job.provider_label"></span> · <span x-text="job.connection_name"></span></p>
+                <p class="mt-2 text-xs leading-relaxed text-txt-soft" x-text="jobDescription(job.provider, job.job_type)"></p>
+                <div class="mt-3 flex flex-wrap gap-2 text-[10px] uppercase tracking-wide text-txt-dim">
+                  <span class="rounded border border-grid bg-bp px-2 py-1" x-text="job.job_type"></span>
+                  <span class="rounded border border-grid bg-bp px-2 py-1">conn #<span x-text="job.connection_id"></span></span>
+                </div>
+              </div>
+              <button type="button" @click="triggerJob(job.id)" :disabled="triggering[job.id] || !job.is_enabled"
+                class="rounded border border-blue-border bg-blue-soft px-4 py-2 text-xs font-semibold uppercase tracking-wide text-blue-text transition-all hover:bg-blue/15 disabled:opacity-40">
+                <span x-text="triggering[job.id] ? '...' : 'Run'"></span>
+              </button>
+            </div>
+          </div>
+        </template>
+      </div>
+      <div x-show="jobs.length === 0" class="rounded-xl border border-grid bg-bp-card px-6 py-16 text-center text-sm text-txt-muted">
+        Sin jobs provisionados para esta cuenta.
+      </div>
+    </section>
+
+    <section x-show="selectedTenantId && activeTab === 'runs'" class="space-y-4">
+      <div>
+        <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Observabilidad</p>
+        <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-white">Corridas</h2>
+      </div>
+      <div class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
+        <table class="w-full text-sm">
+          <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
+            <tr>
+              <th class="px-4 py-3 text-left font-semibold">Run</th>
+              <th class="px-4 py-3 text-left font-semibold">Conexion</th>
+              <th class="px-4 py-3 text-left font-semibold">Job</th>
+              <th class="px-4 py-3 text-left font-semibold">Estado</th>
+              <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Raw / Norm</th>
+              <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Inicio</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(run, idx) in runs" :key="run.id">
+              <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
+                <td class="px-4 py-3 text-xs text-txt-dim">#<span x-text="run.id"></span></td>
+                <td class="px-4 py-3 text-xs text-txt-soft"><span x-text="run.connection_name"></span><span class="text-txt-dim"> · </span><span x-text="run.provider_label"></span></td>
+                <td class="px-4 py-3 text-xs text-txt-soft" x-text="run.job_type"></td>
+                <td class="px-4 py-3">
+                  <span class="rounded border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide"
+                    :class="runStatusClass(run.status)" x-text="run.status"></span>
+                </td>
+                <td class="hidden px-4 py-3 text-xs text-txt-dim md:table-cell">
+                  <span class="text-txt-soft" x-text="run.records_raw"></span>
+                  <span class="mx-1 text-grid-strong">/</span>
+                  <span class="text-txt-soft" x-text="run.records_normalized"></span>
+                </td>
+                <td class="hidden px-4 py-3 text-xs text-txt-dim md:table-cell" x-text="fmtDateTime(run.started_at)"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <div x-show="runs.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin corridas recientes.</div>
+      </div>
+    </section>
+
+    <section x-show="selectedTenantId && activeTab === 'data'" class="space-y-4">
+      <div>
+        <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Modelo canonico</p>
+        <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-white">Data</h2>
+      </div>
+
+      <div class="flex w-fit gap-1 rounded-lg border border-grid bg-bp p-1">
+        <template x-for="dt in dataTabs" :key="dt.id">
+          <button @click="activeDataTab = dt.id; loadDataTab(dt.id)"
+            class="rounded px-3 py-1.5 text-xs font-medium uppercase tracking-wide transition-all"
+            :class="activeDataTab === dt.id ? 'border border-blue-border bg-blue-soft text-blue-bright glow' : 'text-txt-muted hover:text-txt-soft'">
+            <span x-text="dt.label"></span>
+            <span x-show="dataStats[dt.id] !== undefined" class="ml-1 text-txt-dim" x-text="'(' + dataStats[dt.id] + ')' "></span>
+          </button>
+        </template>
+      </div>
+
+      <div x-show="dataLoading" class="rounded-xl border border-grid bg-bp-card px-6 py-14 text-center text-sm text-txt-muted">Cargando...</div>
+
+      <div x-show="activeDataTab === 'products' && !dataLoading" class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
+        <div x-show="dataProducts.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin productos.</div>
+        <table x-show="dataProducts.length > 0" class="w-full text-sm">
+          <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
+            <tr>
+              <th class="px-4 py-3 text-left font-semibold">ID ext.</th>
+              <th class="px-4 py-3 text-left font-semibold">SKU</th>
+              <th class="px-4 py-3 text-left font-semibold">Nombre</th>
+              <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Categoria</th>
+              <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Unidad</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(p, idx) in dataProducts" :key="p.id">
+              <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
+                <td class="px-4 py-3 text-xs text-txt-dim" x-text="p.external_id"></td>
+                <td class="px-4 py-3 text-xs text-txt-soft" x-text="p.sku ?? '—'"></td>
+                <td class="px-4 py-3 text-sm font-medium text-white" x-text="p.name"></td>
+                <td class="hidden px-4 py-3 text-xs text-txt-muted md:table-cell" x-text="p.category ?? '—'"></td>
+                <td class="hidden px-4 py-3 text-xs text-txt-muted md:table-cell" x-text="p.unit ?? '—'"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <div x-show="activeDataTab === 'branches' && !dataLoading" class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
+        <div x-show="dataBranches.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin sucursales.</div>
+        <table x-show="dataBranches.length > 0" class="w-full text-sm">
+          <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
+            <tr>
+              <th class="px-4 py-3 text-left font-semibold">ID ext.</th>
+              <th class="px-4 py-3 text-left font-semibold">Nombre</th>
+              <th class="px-4 py-3 text-left font-semibold">Codigo</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(b, idx) in dataBranches" :key="b.id">
+              <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
+                <td class="px-4 py-3 text-xs text-txt-dim" x-text="b.external_id"></td>
+                <td class="px-4 py-3 text-sm font-medium text-white" x-text="b.name"></td>
+                <td class="px-4 py-3 text-xs text-txt-muted" x-text="b.code ?? '—'"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <div x-show="activeDataTab === 'stock' && !dataLoading" class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
+        <div x-show="dataStock.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin stock.</div>
+        <table x-show="dataStock.length > 0" class="w-full text-sm">
+          <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
+            <tr>
+              <th class="px-4 py-3 text-left font-semibold">Producto</th>
+              <th class="px-4 py-3 text-left font-semibold">Sucursal</th>
+              <th class="px-4 py-3 text-left font-semibold">Cantidad</th>
+              <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Capturado</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(s, idx) in dataStock" :key="s.id">
+              <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
+                <td class="px-4 py-3 text-xs text-txt-soft" x-text="s.product_external_id"></td>
+                <td class="px-4 py-3 text-xs text-txt-soft" x-text="s.branch_external_id"></td>
+                <td class="px-4 py-3 text-sm font-semibold text-white" x-text="s.quantity"></td>
+                <td class="hidden px-4 py-3 text-xs text-txt-dim md:table-cell" x-text="fmtDateTime(s.captured_at)"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <div x-show="activeDataTab === 'sales' && !dataLoading" class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
+        <div x-show="dataSales.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin ventas.</div>
+        <table x-show="dataSales.length > 0" class="w-full text-sm">
+          <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
+            <tr>
+              <th class="px-4 py-3 text-left font-semibold">ID ext.</th>
+              <th class="px-4 py-3 text-left font-semibold">Sucursal</th>
+              <th class="px-4 py-3 text-left font-semibold">Cliente</th>
+              <th class="px-4 py-3 text-left font-semibold">Total</th>
+              <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Emitido</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(sale, idx) in dataSales" :key="sale.id">
+              <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
+                <td class="px-4 py-3 text-xs text-txt-dim" x-text="sale.external_id"></td>
+                <td class="px-4 py-3 text-xs text-txt-soft" x-text="sale.branch_external_id ?? '—'"></td>
+                <td class="px-4 py-3 text-xs text-txt-soft" x-text="sale.customer_external_id ?? '—'"></td>
+                <td class="px-4 py-3 text-sm font-semibold text-white" x-text="'$' + Number(sale.total_amount).toLocaleString('es-CL')"></td>
+                <td class="hidden px-4 py-3 text-xs text-txt-dim md:table-cell" x-text="fmtDateTime(sale.issued_at)"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section x-show="selectedTenantId && activeTab === 'errors'" class="space-y-3">
+      <div>
+        <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Incidentes</p>
+        <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-white">Errores</h2>
+      </div>
+      <template x-for="err in errors" :key="err.id">
+        <div class="rounded-xl border border-red-border bg-bp-card p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="rounded border border-red-border bg-red-soft px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-red-text" x-text="err.severity"></span>
+                <span class="rounded border border-grid bg-bp px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-txt-soft" x-text="err.object_name"></span>
+                <span x-show="err.job_run_id" class="text-[10px] uppercase tracking-wide text-txt-dim">run #<span x-text="err.job_run_id"></span></span>
+              </div>
+              <p class="mt-3 text-sm leading-relaxed text-txt" x-text="err.message"></p>
+              <p class="mt-2 text-xs text-txt-dim" x-text="fmtDateTime(err.created_at)"></p>
+            </div>
+            <button type="button" x-show="err.payload" @click="err._open = !err._open"
+              class="rounded border border-grid px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
+              <span x-text="err._open ? 'Ocultar' : 'Payload'"></span>
+            </button>
+          </div>
+          <pre x-show="err._open" x-transition class="mt-3 overflow-x-auto rounded border border-grid bg-bp p-3 text-xs text-txt-soft" x-text="JSON.stringify(err.payload, null, 2)"></pre>
+        </div>
+      </template>
+      <div x-show="errors.length === 0" class="rounded-xl border border-grid bg-bp-card px-6 py-16 text-center text-sm text-txt-muted">Sin errores registrados.</div>
+    </section>
+
+    <section x-show="selectedTenantId && activeTab === 'audit'" class="space-y-3">
+      <div>
+        <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Governance</p>
+        <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-white">Audit trail</h2>
+      </div>
+      <template x-for="row in auditLogs" :key="row.id">
+        <div class="rounded-xl border border-grid bg-bp-card p-4">
+          <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="rounded border border-cyan-border bg-cyan-soft px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-text" x-text="row.action"></span>
+                <span class="rounded border border-grid bg-bp px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-txt-soft" x-text="row.target_type"></span>
+                <span class="text-[10px] uppercase tracking-wide text-txt-dim" x-text="row.actor"></span>
+              </div>
+              <p class="mt-2 text-sm text-white" x-text="row.target_label ?? row.target_id ?? 'sin etiqueta'"></p>
+              <p class="mt-1 text-xs text-txt-dim" x-text="fmtDateTime(row.created_at)"></p>
+            </div>
+            <pre class="w-full overflow-x-auto rounded border border-grid bg-bp p-3 text-xs text-txt-soft md:w-[420px]" x-text="JSON.stringify(row.payload ?? {}, null, 2)"></pre>
+          </div>
+        </div>
+      </template>
+      <div x-show="auditLogs.length === 0" class="rounded-xl border border-grid bg-bp-card px-6 py-16 text-center text-sm text-txt-muted">Sin eventos auditados.</div>
+    </section>
+  </main>
+
+  <div class="pointer-events-none fixed bottom-5 right-5 z-50 flex flex-col gap-2">
+    <template x-for="toast in toasts" :key="toast.id">
+      <div class="pointer-events-auto flex items-center gap-3 rounded-lg border bg-bp-card px-4 py-3 text-sm"
+        :class="toast.type === 'success' ? 'border-green-border text-green-text glow-green' : 'border-red-border text-red-text'">
+        <svg x-show="toast.type === 'success'" class="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+        <svg x-show="toast.type !== 'success'" class="h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        <span x-text="toast.message"></span>
+      </div>
+    </template>
+  </div>
+
+  <script>
+    function app() {
+      return {
+        health: null,
+        uiBuild: UI_BUILD,
+        tenants: [],
+        providers: [],
+        overview: null,
+        connectors: [],
+        jobs: [],
+        runs: [],
+        errors: [],
+        auditLogs: [],
+        selectedTenantId: null,
+        activeTab: 'overview',
+        autoRefresh: true,
+        loading: false,
+        creatingConnection: false,
+        switchingMode: {},
+        triggering: {},
+        openConns: {},
+        connName: {},
+        connMode: {},
+        connEnv: {},
+        connUrl: {},
+        connTok: {},
+        createOpen: false,
+        createConn: {
+          provider: 'bsale',
+          name: '',
+          mode: 'mock',
+          environment: 'mock',
+          base_url: '',
+          api_key: '',
+          is_primary: false,
+        },
+        toasts: [],
+        _interval: null,
+
+        activeDataTab: 'products',
+        dataLoading: false,
+        dataStats: {},
+        dataProducts: [],
+        dataBranches: [],
+        dataStock: [],
+        dataSales: [],
+        dataTabs: [
+          { id: 'products', label: 'Productos' },
+          { id: 'branches', label: 'Sucursales' },
+          { id: 'stock', label: 'Stock' },
+          { id: 'sales', label: 'Ventas' },
+        ],
+
+        get currentTenant() {
+          return this.tenants.find(tenant => tenant.id === Number(this.selectedTenantId)) ?? null
+        },
+
+        get tabs() {
+          const running = this.runs.filter(run => run.status === 'running').length
+          return [
+            { id: 'overview', label: 'Overview', badge: this.overview?.totals?.connections_total ?? null },
+            { id: 'connectors', label: 'Conectores', badge: this.connectors.length || null },
+            { id: 'jobs', label: 'Jobs', badge: this.jobs.length || null },
+            { id: 'runs', label: 'Corridas', badge: running > 0 ? `${running} live` : (this.runs.length || null), badgeClass: running > 0 ? 'border-cyan-border bg-cyan-soft text-cyan-text' : 'border-grid bg-bp text-txt-muted' },
+            { id: 'data', label: 'Data', badge: null },
+            { id: 'errors', label: 'Errores', badge: this.errors.length || null, badgeClass: 'border-red-border bg-red-soft text-red-text' },
+            { id: 'audit', label: 'Audit', badge: this.auditLogs.length || null },
+          ]
+        },
+
+        async init() {
+          await this.fetchProviders()
+          this.syncCreateDefaults(true)
+          await this.fetchTenants()
+          await this.refresh()
+          this._interval = setInterval(() => { if (this.autoRefresh) this._softRefresh() }, 5000)
+        },
+
+        toggleAutoRefresh() { this.autoRefresh = !this.autoRefresh },
+
+        tenantScopedUrl(url) {
+          if (!this.selectedTenantId) return url
+          return `${url}${url.includes('?') ? '&' : '?'}tenant_id=${this.selectedTenantId}`
+        },
+
+        providerMeta(providerKey) {
+          return this.providers.find(provider => provider.key === providerKey) ?? null
+        },
+
+        createProviderEnvironments() {
+          return this.providerEnvironments(this.createConn.provider)
+        },
+
+        providerEnvironments(providerKey) {
+          return this.providerMeta(providerKey)?.environments ?? ['mock', 'production']
+        },
+
+        defaultProviderUrl(providerKey, mode) {
+          return this.providerMeta(providerKey)?.default_base_urls?.[mode] ?? ''
+        },
+
+        syncCreateDefaults(forceUrl = false) {
+          if (!this.createConn.provider && this.providers.length > 0) this.createConn.provider = this.providers[0].key
+          const provider = this.providerMeta(this.createConn.provider)
+          if (!provider) return
+          this.createConn.environment = this.createConn.mode === 'mock' ? 'mock' : provider.default_environment
+          const defaultUrl = this.defaultProviderUrl(provider.key, this.createConn.mode)
+          if (forceUrl || !this.createConn.base_url) this.createConn.base_url = defaultUrl
+        },
+
+        resetCreateForm() {
+          this.createConn = {
+            provider: this.providers[0]?.key ?? 'bsale',
+            name: '',
+            mode: 'mock',
+            environment: 'mock',
+            base_url: '',
+            api_key: '',
+            is_primary: false,
+          }
+          this.syncCreateDefaults(true)
+        },
+
+        clearTenantScopedState() {
+          this.overview = null
+          this.connectors = []
+          this.jobs = []
+          this.runs = []
+          this.errors = []
+          this.auditLogs = []
+          this.openConns = {}
+          this.connName = {}
+          this.connMode = {}
+          this.connEnv = {}
+          this.connUrl = {}
+          this.connTok = {}
+          this.dataStats = {}
+          this.dataProducts = []
+          this.dataBranches = []
+          this.dataStock = []
+          this.dataSales = []
+        },
+
+        async changeTenant(rawTenantId) {
+          this.selectedTenantId = rawTenantId ? Number(rawTenantId) : null
+          this.clearTenantScopedState()
+          await this.refresh()
+          if (this.activeTab === 'data') await this.loadDataTab(this.activeDataTab)
+        },
+
+        async refresh() {
+          this.loading = true
+          try {
+            await Promise.all([this.fetchHealth(), this.fetchProviders(), this.fetchTenants()])
+            if (!this.selectedTenantId) {
+              this.clearTenantScopedState()
+              return
+            }
+            await Promise.all([
+              this.fetchOverview(),
+              this.fetchConnectors(),
+              this.fetchJobs(),
+              this.fetchRuns(),
+              this.fetchErrors(),
+              this.fetchAudit(),
+            ])
+            if (this.activeTab === 'data') await this.loadDataTab(this.activeDataTab)
+          } finally {
+            this.loading = false
+          }
+        },
+
+        async _softRefresh() {
+          if (!this.selectedTenantId) return
+          await Promise.all([
+            this.fetchHealth(),
+            this.fetchOverview(),
+            this.fetchConnectors(),
+            this.fetchJobs(),
+            this.fetchRuns(),
+            this.fetchErrors(),
+            this.fetchAudit(),
+          ])
+        },
+
+        async _fetchJson(url) {
+          const response = await fetch(url)
+          if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail ?? response.statusText)
+          return response.json()
+        },
+
+        async _fetchArray(url) {
+          const data = await this._fetchJson(url)
+          return Array.isArray(data) ? data : []
+        },
+
+        async fetchHealth() {
+          try { this.health = await this._fetchJson('/admin/health') } catch {}
+        },
+
+        async fetchTenants() {
+          try {
+            const tenants = await this._fetchArray('/admin/tenants')
+            this.tenants = tenants
+            if (!this.selectedTenantId || !tenants.some(tenant => tenant.id === Number(this.selectedTenantId))) {
+              this.selectedTenantId = tenants.length > 0 ? tenants[0].id : null
+            }
+          } catch {}
+        },
+
+        async fetchProviders() {
+          try {
+            this.providers = await this._fetchArray('/admin/providers')
+            if (!this.createConn.provider && this.providers.length > 0) this.createConn.provider = this.providers[0].key
+            this.syncCreateDefaults(false)
+          } catch {}
+        },
+
+        async fetchOverview() {
+          if (!this.selectedTenantId) return
+          try { this.overview = await this._fetchJson(this.tenantScopedUrl('/admin/overview')) } catch {}
+        },
+
+        async fetchConnectors() {
+          if (!this.selectedTenantId) return
+          try { this.connectors = await this._fetchArray(this.tenantScopedUrl('/admin/connectors')) } catch {}
+        },
+
+        async fetchJobs() {
+          if (!this.selectedTenantId) return
+          try { this.jobs = await this._fetchArray(this.tenantScopedUrl('/admin/jobs')) } catch {}
+        },
+
+        async fetchRuns() {
+          if (!this.selectedTenantId) return
+          try { this.runs = await this._fetchArray(this.tenantScopedUrl('/admin/runs?limit=50')) } catch {}
+        },
+
+        async fetchErrors() {
+          if (!this.selectedTenantId) return
+          try {
+            this.errors = (await this._fetchArray(this.tenantScopedUrl('/admin/errors?limit=30'))).map(err => ({ ...err, _open: false }))
+          } catch {}
+        },
+
+        async fetchAudit() {
+          if (!this.selectedTenantId) return
+          try { this.auditLogs = await this._fetchArray(this.tenantScopedUrl('/admin/audit?limit=30')) } catch {}
+        },
+
+        async loadDataTab(tab) {
+          if (!this.selectedTenantId) return
+          this.dataLoading = true
+          try {
+            const data = await this._fetchJson(this.tenantScopedUrl(`/admin/data/${tab}`))
+            this.dataStats = { ...this.dataStats, [tab]: data.total }
+            const items = Array.isArray(data.items) ? data.items : []
+            if (tab === 'products') this.dataProducts = items
+            if (tab === 'branches') this.dataBranches = items
+            if (tab === 'stock') this.dataStock = items
+            if (tab === 'sales') this.dataSales = items
+          } catch (error) {
+            this.notify('error', error.message)
+          } finally {
+            this.dataLoading = false
+          }
+        },
+
+        prepareConnectionForm(conn) {
+          this.connName = { ...this.connName, [conn.id]: this.connName[conn.id] ?? conn.name }
+          this.connMode = { ...this.connMode, [conn.id]: this.connMode[conn.id] ?? conn.mode }
+          this.connEnv = { ...this.connEnv, [conn.id]: this.connEnv[conn.id] ?? conn.environment }
+          this.connUrl = { ...this.connUrl, [conn.id]: this.connUrl[conn.id] ?? conn.base_url }
+          this.connTok = { ...this.connTok, [conn.id]: this.connTok[conn.id] ?? '' }
+          this.syncConnectionDefaults(conn.id, conn.provider, false)
+        },
+
+        syncConnectionDefaults(connId, providerKey, forceUrl = false) {
+          const mode = this.connMode[connId] ?? 'mock'
+          this.connEnv = { ...this.connEnv, [connId]: mode === 'mock' ? 'mock' : (this.providerMeta(providerKey)?.default_environment ?? 'production') }
+          const defaultUrl = this.defaultProviderUrl(providerKey, mode)
+          if (forceUrl || !this.connUrl[connId]) {
+            this.connUrl = { ...this.connUrl, [connId]: defaultUrl }
+          }
+        },
+
+        openConnectionEditor(connId) {
+          const conn = this.connectors.find(item => item.id === connId)
+          if (!conn) return
+          this.prepareConnectionForm(conn)
+          this.openConns = { ...this.openConns, [conn.id]: true }
+          this.activeTab = 'connectors'
+        },
+
+        async createConnection() {
+          if (!this.selectedTenantId || this.creatingConnection) return
+          this.creatingConnection = true
+          try {
+            const body = {
+              provider: this.createConn.provider,
+              mode: this.createConn.mode,
+              environment: this.createConn.environment,
+              is_primary: this.createConn.is_primary,
+            }
+            if ((this.createConn.name ?? '').trim()) body.name = this.createConn.name.trim()
+            if ((this.createConn.base_url ?? '').trim()) body.base_url = this.createConn.base_url.trim()
+            if ((this.createConn.api_key ?? '').trim()) body.api_key = this.createConn.api_key.trim()
+
+            const response = await fetch(this.tenantScopedUrl('/admin/connectors'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            })
+            if (!response.ok) throw new Error((await response.json()).detail ?? response.statusText)
+            const payload = await response.json()
+            await Promise.all([this.fetchOverview(), this.fetchConnectors(), this.fetchJobs(), this.fetchAudit()])
+            this.openConnectionEditor(payload.id)
+            this.notify('success', payload.message ?? 'Conexion creada')
+            this.resetCreateForm()
+            this.createOpen = false
+          } catch (error) {
+            this.notify('error', error.message)
+          } finally {
+            this.creatingConnection = false
+          }
+        },
+
+        async updateConnection(connId, body, method = 'PATCH', suffix = '') {
+          if (!this.selectedTenantId || this.switchingMode[connId]) return null
+          this.switchingMode = { ...this.switchingMode, [connId]: true }
+          try {
+            const response = await fetch(this.tenantScopedUrl(`/admin/connectors/${connId}${suffix}`), {
+              method,
+              headers: body ? { 'Content-Type': 'application/json' } : undefined,
+              body: body ? JSON.stringify(body) : undefined,
+            })
+            if (!response.ok) throw new Error((await response.json()).detail ?? response.statusText)
+            const payload = await response.json()
+            await Promise.all([this.fetchOverview(), this.fetchConnectors(), this.fetchJobs(), this.fetchRuns(), this.fetchErrors(), this.fetchAudit()])
+            this.notify(payload.connected === false || payload.last_check_ok === false ? 'error' : 'success', payload.message ?? 'Operacion completada')
+            return payload
+          } catch (error) {
+            this.notify('error', error.message)
+            return null
+          } finally {
+            this.switchingMode = { ...this.switchingMode, [connId]: false }
+          }
+        },
+
+        async saveConnectionConfig(connId) {
+          const conn = this.connectors.find(item => item.id === connId)
+          if (!conn) return null
+          const body = {
+            name: (this.connName[connId] ?? conn.name ?? '').trim() || conn.name,
+            mode: this.connMode[connId] ?? conn.mode,
+            environment: this.connEnv[connId] ?? conn.environment,
+            base_url: (this.connUrl[connId] ?? '').trim(),
+          }
+          const token = (this.connTok[connId] ?? '').trim()
+          if (token) body.secret_ref = token
+          return await this.updateConnection(connId, body)
+        },
+
+        async saveAndCheckConnection(connId) {
+          const saved = await this.saveConnectionConfig(connId)
+          if (!saved) return null
+          const checked = await this.updateConnection(connId, null, 'POST', '/check')
+          if (checked?.connected) {
+            this.openConns = { ...this.openConns, [connId]: false }
+          }
+          return checked
+        },
+
+        async switchConnectionToMock(conn) {
+          this.connMode = { ...this.connMode, [conn.id]: 'mock' }
+          this.connEnv = { ...this.connEnv, [conn.id]: 'mock' }
+          this.connUrl = { ...this.connUrl, [conn.id]: this.defaultProviderUrl(conn.provider, 'mock') || conn.base_url }
+          await this.updateConnection(conn.id, {
+            name: (this.connName[conn.id] ?? conn.name).trim(),
+            mode: 'mock',
+            environment: 'mock',
+            base_url: this.connUrl[conn.id],
+          })
+        },
+
+        async makePrimary(connId) {
+          await this.updateConnection(connId, null, 'POST', '/primary')
+        },
+
+        async toggleJobsForConnection(conn) {
+          if (!this.selectedTenantId || this.switchingMode[conn.id]) return
+          const enable = !(conn.jobs_enabled === conn.jobs_total && conn.jobs_total > 0)
+          this.switchingMode = { ...this.switchingMode, [conn.id]: true }
+          try {
+            const response = await fetch(this.tenantScopedUrl(`/admin/connectors/${conn.id}/jobs/activate`), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ enabled: enable }),
+            })
+            if (!response.ok) throw new Error((await response.json()).detail ?? response.statusText)
+            await Promise.all([this.fetchOverview(), this.fetchConnectors(), this.fetchJobs(), this.fetchAudit()])
+            this.notify('success', enable ? 'Jobs activados' : 'Jobs desactivados')
+          } catch (error) {
+            this.notify('error', error.message)
+          } finally {
+            this.switchingMode = { ...this.switchingMode, [conn.id]: false }
+          }
+        },
+
+        async queueConnectionSync(connId) {
+          if (!this.selectedTenantId || this.switchingMode[connId]) return
+          this.switchingMode = { ...this.switchingMode, [connId]: true }
+          try {
+            const response = await fetch(this.tenantScopedUrl(`/admin/connectors/${connId}/sync`), { method: 'POST' })
+            if (!response.ok) throw new Error((await response.json()).detail ?? response.statusText)
+            const payload = await response.json()
+            await Promise.all([this.fetchRuns(), this.fetchAudit(), this.fetchOverview(), this.fetchConnectors()])
+            this.activeTab = 'runs'
+            this.notify('success', payload.message ?? 'Sync encolado')
+          } catch (error) {
+            this.notify('error', error.message)
+          } finally {
+            this.switchingMode = { ...this.switchingMode, [connId]: false }
+          }
+        },
+
+        async triggerJob(jobId) {
+          if (!this.selectedTenantId) return
+          const job = this.jobs.find(item => item.id === jobId)
+          if (!job?.is_enabled) {
+            this.notify('error', 'El job esta deshabilitado')
+            return
+          }
+          this.triggering = { ...this.triggering, [jobId]: true }
+          try {
+            const response = await fetch(this.tenantScopedUrl(`/admin/jobs/${jobId}/runs`), { method: 'POST' })
+            if (!response.ok) throw new Error((await response.json()).detail ?? response.statusText)
+            const run = await response.json()
+            await Promise.all([this.fetchRuns(), this.fetchAudit(), this.fetchOverview()])
+            this.activeTab = 'runs'
+            this.notify('success', `Run #${run.id} encolado`)
+          } catch (error) {
+            this.notify('error', error.message)
+          } finally {
+            this.triggering = { ...this.triggering, [jobId]: false }
+          }
+        },
+
+        async triggerAll() {
+          for (const job of this.jobs.filter(job => job.is_enabled)) {
+            await this.triggerJob(job.id)
+          }
+        },
+
+        openConnectionById(connId) {
+          this.activeTab = 'connectors'
+          this.openConnectionEditor(connId)
+        },
+
+        jobDescription(providerKey, jobType) {
+          const provider = this.providerMeta(providerKey)
+          return provider?.jobs?.find(job => job.job_type === jobType)?.description ?? jobType
+        },
+
+        connectionStatusLabel(status) {
+          return {
+            mock: 'mock',
+            config_incomplete: 'config incompleta',
+            configured: 'configurada',
+            healthy: 'saludable',
+            auth_failed: 'auth failed',
+            connection_error: 'conexion fallida',
+          }[status] ?? status
+        },
+
+        connectionStatusClass(status) {
+          return {
+            mock: 'border-amber-border bg-amber-soft text-amber-text',
+            config_incomplete: 'border-amber-border bg-amber-soft text-amber-text',
+            configured: 'border-blue-border bg-blue-soft text-blue-text',
+            healthy: 'border-green-border bg-green-soft text-green-text',
+            auth_failed: 'border-red-border bg-red-soft text-red-text',
+            connection_error: 'border-red-border bg-red-soft text-red-text',
+          }[status] ?? 'border-grid bg-bp text-txt-muted'
+        },
+
+        progressClass(progress) {
+          if (progress >= 100) return 'bg-green'
+          if (progress >= 50) return 'bg-blue'
+          return 'bg-amber'
+        },
+
+        runStatusClass(status) {
+          return {
+            success: 'border-green-border bg-green-soft text-green-text',
+            queued: 'border-amber-border bg-amber-soft text-amber-text',
+            running: 'border-cyan-border bg-cyan-soft text-cyan-text',
+            failed: 'border-red-border bg-red-soft text-red-text',
+          }[status] ?? 'border-grid bg-bp text-txt-muted'
+        },
+
+        fmtDateTime(iso) {
+          if (!iso) return '—'
+          return new Date(iso + 'Z').toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'medium' })
+        },
+
+        notify(type, message) {
+          const id = Date.now() + Math.random()
+          this.toasts.push({ id, type, message })
+          setTimeout(() => {
+            this.toasts = this.toasts.filter(toast => toast.id !== id)
+          }, 3500)
+        },
+      }
+    }
+  </script>
+</body>
+</html>
