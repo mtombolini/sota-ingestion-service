@@ -14,6 +14,11 @@ from app.jobs.tasks import execute_run
 from app.models import (
     AdminAuditLog,
     Branch,
+    Client,
+    ClientAddress,
+    ClientAttribute,
+    ClientContact,
+    DocumentType,
     IntegrationConnection,
     IntegrationError,
     IntegrationJob,
@@ -23,6 +28,8 @@ from app.models import (
     IntegrationRawObject,
     IntegrationSecret,
     Product,
+    ProductTax,
+    ProductVariant,
     SalesDocument,
     SalesDocumentLine,
     StockSnapshot,
@@ -90,6 +97,8 @@ class ConnectionHealthStats(BaseModel):
 
 JOB_LABELS = {
     "sync_product_catalog": "Catalogo",
+    "sync_customers": "Clientes",
+    "sync_document_types": "Tipos de documento",
     "sync_stock_snapshot": "Stock",
     "sync_sales_documents": "Ventas",
     "sync_branches": "Sucursales",
@@ -548,7 +557,7 @@ def delete_tenant(tenant_id: int, force: bool = False, request: Request = None, 
     if sales_doc_ids:
         db.execute(SalesDocumentLine.__table__.delete().where(SalesDocumentLine.sales_document_id.in_(sales_doc_ids)))
     # 2. Tables with FK to tenant only (or to job_runs)
-    for model in (SalesDocument, StockSnapshot, Product, Branch, IntegrationError, IntegrationOutboxEvent, IntegrationMapping, IntegrationSecret, AdminAuditLog):
+    for model in (SalesDocument, StockSnapshot, ClientAttribute, ClientAddress, ClientContact, Client, ProductTax, ProductVariant, Product, DocumentType, Branch, IntegrationError, IntegrationOutboxEvent, IntegrationMapping, IntegrationSecret, AdminAuditLog):
         db.execute(model.__table__.delete().where(model.tenant_id == tenant_id))
     # 3. Raw objects (FK → job_runs) and job runs (FK → jobs)
     job_ids = db.scalars(select(IntegrationJob.id).where(IntegrationJob.tenant_id == tenant_id)).all()
@@ -1048,9 +1057,14 @@ def data_products(limit: int = 50, tenant_id: int | None = None, db: Session = D
                 "external_id": p.external_id,
                 "sku": p.sku,
                 "name": p.name,
+                "description": p.description,
+                "classification": p.classification,
+                "product_type_id": p.product_type_id,
+                "state": p.state,
                 "category": p.category,
                 "unit": p.unit,
                 "is_active": p.is_active,
+                "variant_count": len(p.variants),
             }
             for p in items
         ],
@@ -1066,8 +1080,85 @@ def data_branches(tenant_id: int | None = None, db: Session = Depends(get_db)):
     return {
         "total": total,
         "items": [
-            {"id": b.id, "external_id": b.external_id, "name": b.name, "code": b.code}
+            {
+                "id": b.id,
+                "external_id": b.external_id,
+                "name": b.name,
+                "description": b.description,
+                "address": b.address,
+                "country": b.country,
+                "city": b.city,
+                "municipality": b.municipality,
+                "zip_code": b.zip_code,
+                "cost_center": b.cost_center,
+                "is_virtual": b.is_virtual,
+                "state": b.state,
+                "imagestion_cellar_id": b.imagestion_cellar_id,
+                "code": b.code,
+            }
             for b in items
+        ],
+    }
+
+
+@admin_router.get("/data/document-types")
+def data_document_types(limit: int = 50, tenant_id: int | None = None, db: Session = Depends(get_db)):
+    tenant = _resolve_tenant(db, tenant_id)
+    stmt = select(DocumentType).where(DocumentType.tenant_id == tenant.id)
+    total = db.scalar(select(func.count()).select_from(stmt.subquery()))
+    items = db.scalars(stmt.order_by(DocumentType.id.desc()).limit(limit)).all()
+    return {
+        "total": total,
+        "items": [
+            {
+                "id": item.id,
+                "external_id": item.external_id,
+                "name": item.name,
+                "initial_number": item.initial_number,
+                "code_sii": item.code_sii,
+                "use": item.use,
+                "state": item.state,
+                "is_electronic_document": item.is_electronic_document,
+                "is_sales_note": item.is_sales_note,
+                "is_exempt": item.is_exempt,
+                "is_credit_note": item.is_credit_note,
+                "use_client": item.use_client,
+                "book_type_id": item.book_type_id,
+            }
+            for item in items
+        ],
+    }
+
+
+@admin_router.get("/data/customers")
+def data_customers(limit: int = 50, tenant_id: int | None = None, db: Session = Depends(get_db)):
+    tenant = _resolve_tenant(db, tenant_id)
+    stmt = select(Client).where(Client.tenant_id == tenant.id)
+    total = db.scalar(select(func.count()).select_from(stmt.subquery()))
+    items = db.scalars(stmt.order_by(Client.id.desc()).limit(limit)).all()
+    return {
+        "total": total,
+        "items": [
+            {
+                "id": c.id,
+                "external_id": c.external_id,
+                "first_name": c.first_name,
+                "last_name": c.last_name,
+                "email": c.email,
+                "code": c.code,
+                "company": c.company,
+                "phone": c.phone,
+                "state": c.state,
+                "activity": c.activity,
+                "city": c.city,
+                "municipality": c.municipality,
+                "points": c.points,
+                "office_external_id": c.office_external_id,
+                "contact_count": len(c.contacts),
+                "address_count": len(c.addresses),
+                "attribute_count": len(c.attributes),
+            }
+            for c in items
         ],
     }
 

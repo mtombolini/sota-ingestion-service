@@ -11,6 +11,9 @@ class BaseConnector(ABC):
     async def fetch_products(self) -> list[dict[str, Any]]: ...
 
     @abstractmethod
+    async def fetch_clients(self) -> list[dict[str, Any]]: ...
+
+    @abstractmethod
     async def fetch_stock(self) -> list[dict[str, Any]]: ...
 
     @abstractmethod
@@ -18,6 +21,9 @@ class BaseConnector(ABC):
 
     @abstractmethod
     async def fetch_branches(self) -> list[dict[str, Any]]: ...
+
+    @abstractmethod
+    async def fetch_document_types(self) -> list[dict[str, Any]]: ...
 
 
 class ConnectorMode(str, Enum):

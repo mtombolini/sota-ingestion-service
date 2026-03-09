@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from typing import Any
 
@@ -20,26 +21,117 @@ class BsaleConnector(BaseConnector):
         self.headers = {"access_token": token}
         self.timeout_s = timeout_s
 
-    async def _fetch(self, endpoint: str, params: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
-            response = await client.get(f"{self.base_url}/{endpoint}", headers=self.headers, params=params)
+    async def _fetch_json(
+        self,
+        endpoint: str,
+        params: dict[str, Any] | None = None,
+        *,
+        client: httpx.AsyncClient | None = None,
+    ) -> Any:
+        async def _request(active_client: httpx.AsyncClient) -> Any:
+            response = await active_client.get(f"{self.base_url}/{endpoint}", headers=self.headers, params=params)
             response.raise_for_status()
-            payload = response.json()
-            if isinstance(payload, dict) and "items" in payload:
-                return payload["items"]
-            return payload
+            return response.json()
+
+        if client is not None:
+            return await _request(client)
+
+        async with httpx.AsyncClient(timeout=self.timeout_s) as active_client:
+            return await _request(active_client)
+
+    async def _fetch_items(
+        self,
+        endpoint: str,
+        params: dict[str, Any] | None = None,
+        *,
+        client: httpx.AsyncClient | None = None,
+    ) -> list[dict[str, Any]]:
+        payload = await self._fetch_json(endpoint, params=params, client=client)
+        if isinstance(payload, dict) and "items" in payload:
+            return payload["items"]
+        return payload
+
+    async def _fetch_paginated(
+        self,
+        endpoint: str,
+        params: dict[str, Any] | None = None,
+        *,
+        page_size: int = 50,
+        client: httpx.AsyncClient | None = None,
+    ) -> list[dict[str, Any]]:
+        collected: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            page_params = dict(params or {})
+            page_params.update({"limit": str(page_size), "offset": str(offset)})
+            items = await self._fetch_items(endpoint, params=page_params, client=client)
+            if not items:
+                break
+            collected.extend(items)
+            if len(items) < page_size:
+                break
+            offset += len(items)
+        return collected
 
     async def fetch_products(self) -> list[dict[str, Any]]:
-        return await self._fetch("products.json")
+        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+            products = await self._fetch_paginated("products.json", client=client)
+            enriched_products: list[dict[str, Any]] = []
+            for product in products:
+                product_id = product.get("id")
+                if product_id is None:
+                    enriched_products.append(product)
+                    continue
+                variants, product_taxes = await asyncio.gather(
+                    self._fetch_paginated(f"products/{product_id}/variants.json", client=client),
+                    self._fetch_paginated(f"products/{product_id}/product_taxes.json", client=client),
+                )
+                enriched_products.append(
+                    {
+                        **product,
+                        "variants": variants,
+                        "product_taxes_items": product_taxes,
+                    }
+                )
+            return enriched_products
+
+    async def fetch_clients(self) -> list[dict[str, Any]]:
+        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+            clients = await self._fetch_paginated("clients.json", client=client)
+            enriched_clients: list[dict[str, Any]] = []
+            for client_payload in clients:
+                client_id = client_payload.get("id")
+                if client_id is None:
+                    enriched_clients.append(client_payload)
+                    continue
+                client_detail, contacts, addresses, attributes = await asyncio.gather(
+                    self._fetch_json(f"clients/{client_id}.json", client=client),
+                    self._fetch_paginated(f"clients/{client_id}/contacts.json", client=client),
+                    self._fetch_paginated(f"clients/{client_id}/addresses.json", client=client),
+                    self._fetch_paginated(f"clients/{client_id}/attributes.json", client=client),
+                )
+                enriched_clients.append(
+                    {
+                        **client_payload,
+                        **client_detail,
+                        "contacts_items": contacts,
+                        "addresses_items": addresses,
+                        "attributes_items": attributes,
+                    }
+                )
+            return enriched_clients
 
     async def fetch_stock(self) -> list[dict[str, Any]]:
-        return await self._fetch("stocks.json")
+        return await self._fetch_paginated("stocks.json")
 
     async def fetch_sales_documents(self) -> list[dict[str, Any]]:
-        return await self._fetch("documents.json", params={"expand": "details", "state": "0", "limit": "50"})
+        return await self._fetch_paginated("documents.json", params={"expand": "details", "state": "0"})
 
     async def fetch_branches(self) -> list[dict[str, Any]]:
-        return await self._fetch("offices.json")
+        return await self._fetch_paginated("offices.json")
+
+    async def fetch_document_types(self) -> list[dict[str, Any]]:
+        return await self._fetch_paginated("document_types.json")
 
 
 def _clean(value: str | None) -> str | None:
@@ -155,21 +247,39 @@ def probe_bsale_connection(
     if not config.api_key:
         raise ConnectorConfigurationError("Falta configuracion para modo real de Bsale: api_key")
 
-    url = config.base_url.rstrip("/") + "/company.json"
+    base_url = config.base_url.rstrip("/")
+    url = base_url + "/company.json"
     headers = {"access_token": config.api_key}
 
     try:
         with httpx.Client(timeout=timeout_s, follow_redirects=True) as client:
             response = client.get(url, headers=headers)
+            if response.is_success:
+                try:
+                    payload = response.json()
+                except ValueError:
+                    payload = None
+                try:
+                    products_response = client.get(base_url + "/products.json", headers=headers, params={"limit": 1, "offset": 0})
+                except httpx.HTTPError as exc:
+                    return False, f"Conexion base OK en {url}, pero fallo lectura de productos: {exc}", payload
+                if not products_response.is_success:
+                    detail = " ".join(products_response.text.split())[:200] or "sin detalle"
+                    return False, (
+                        f"Conexion base OK en {url}, pero products.json respondio HTTP {products_response.status_code}: {detail}"
+                    ), payload
+                try:
+                    clients_response = client.get(base_url + "/clients.json", headers=headers, params={"limit": 1, "offset": 0})
+                except httpx.HTTPError as exc:
+                    return False, f"Conexion base OK en {url}, pero fallo lectura de clientes: {exc}", payload
+                if not clients_response.is_success:
+                    detail = " ".join(clients_response.text.split())[:200] or "sin detalle"
+                    return False, (
+                        f"Conexion base OK en {url}, pero clients.json respondio HTTP {clients_response.status_code}: {detail}"
+                    ), payload
+                return True, f"Conexion exitosa a {url} y lectura OK de products.json y clients.json.", payload
     except httpx.HTTPError as exc:
         return False, f"No fue posible conectar a Bsale ({url}): {exc}", None
-
-    if response.is_success:
-        try:
-            payload = response.json()
-        except ValueError:
-            payload = None
-        return True, f"Conexion exitosa a {url}.", payload
 
     detail = " ".join(response.text.split())[:200] or "sin detalle"
     return False, f"Bsale respondio HTTP {response.status_code} al consultar {url}: {detail}", None

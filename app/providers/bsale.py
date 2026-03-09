@@ -15,7 +15,14 @@ from app.connectors.bsale import (
     resolve_real_base_url,
 )
 from app.models import IntegrationConnection
-from app.normalizers.bsale import normalize_branch, normalize_product, normalize_sales_document, normalize_stock
+from app.normalizers.bsale import (
+    normalize_branch,
+    normalize_client,
+    normalize_document_type,
+    normalize_product,
+    normalize_sales_document,
+    normalize_stock,
+)
 from app.providers.base import ProviderCheckResult, ProviderDefinition, ProviderJobDefinition
 from app.secrets import SecretStore
 
@@ -23,7 +30,7 @@ from app.secrets import SecretStore
 class BsaleProvider(ProviderDefinition):
     key = "bsale"
     display_name = "Bsale"
-    description = "Conector de catalogo, stock, ventas y sucursales via API Bsale."
+    description = "Conector de catalogo, clientes, tipos de documento, stock, ventas y sucursales via API Bsale."
     environments = ("mock", "production")
     default_environment = "production"
     docs_url = "https://api.bsale.cl"
@@ -31,7 +38,17 @@ class BsaleProvider(ProviderDefinition):
         ProviderJobDefinition(
             job_type="sync_product_catalog",
             label="Catalogo",
-            description="Trae productos y normaliza el catalogo canonico.",
+            description="Trae productos, variantes e impuestos asociados y normaliza el catalogo canonico.",
+        ),
+        ProviderJobDefinition(
+            job_type="sync_customers",
+            label="Clientes",
+            description="Trae clientes con contactos, direcciones y atributos asociados.",
+        ),
+        ProviderJobDefinition(
+            job_type="sync_document_types",
+            label="Tipos de documento",
+            description="Sincroniza tipos de documento configurados en Bsale para referencias y validaciones.",
         ),
         ProviderJobDefinition(
             job_type="sync_stock_snapshot",
@@ -192,6 +209,10 @@ class BsaleProvider(ProviderDefinition):
     def normalize(self, job_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         if job_type == "sync_product_catalog":
             return normalize_product(payload)
+        if job_type == "sync_customers":
+            return normalize_client(payload)
+        if job_type == "sync_document_types":
+            return normalize_document_type(payload)
         if job_type == "sync_stock_snapshot":
             return normalize_stock(payload)
         if job_type == "sync_sales_documents":
@@ -203,6 +224,8 @@ class BsaleProvider(ProviderDefinition):
     def source_endpoint_for_job(self, job_type: str) -> str:
         return {
             "sync_product_catalog": "products.json",
+            "sync_customers": "clients.json",
+            "sync_document_types": "document_types.json",
             "sync_stock_snapshot": "stocks.json",
             "sync_sales_documents": "documents.json",
             "sync_branches": "offices.json",

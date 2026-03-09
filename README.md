@@ -61,6 +61,8 @@ La implementación del conector usa el mismo cliente HTTP y endpoints; cambia so
 
 ## Jobs disponibles
 - `sync_product_catalog`
+- `sync_customers`
+- `sync_document_types`
 - `sync_stock_snapshot`
 - `sync_sales_documents`
 - `sync_branches`

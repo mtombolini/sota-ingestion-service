@@ -41,13 +41,13 @@ def main():
             if getattr(conn, "is_primary", None) is None:
                 conn.is_primary = True
 
-        job_types = ["sync_product_catalog", "sync_stock_snapshot", "sync_sales_documents", "sync_branches"]
+        job_types = ["sync_product_catalog", "sync_customers", "sync_document_types", "sync_stock_snapshot", "sync_sales_documents", "sync_branches"]
         existing = {j.job_type for j in db.scalars(select(IntegrationJob).where(IntegrationJob.tenant_id == tenant.id)).all()}
         for jt in job_types:
             if jt not in existing:
                 db.add(IntegrationJob(tenant_id=tenant.id, connection_id=conn.id, job_type=jt, schedule=None))
 
-        for obj in ["products", "stocks", "sales_documents", "branches"]:
+        for obj in ["products", "clients", "document_types", "stocks", "sales_documents", "branches"]:
             m = db.scalar(select(IntegrationMapping).where(IntegrationMapping.tenant_id == tenant.id, IntegrationMapping.object_name == obj))
             if not m:
                 db.add(IntegrationMapping(tenant_id=tenant.id, provider="bsale", object_name=obj, version="v1", mapping_payload={"strategy": "static-approved", "notes": "onboarding mapping"}))
