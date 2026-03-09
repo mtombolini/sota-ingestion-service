@@ -36,7 +36,7 @@ class BsaleConnector(BaseConnector):
         return await self._fetch("stocks.json")
 
     async def fetch_sales_documents(self) -> list[dict[str, Any]]:
-        return await self._fetch("documents/sales.json")
+        return await self._fetch("documents.json", params={"expand": "details", "state": "0", "limit": "50"})
 
     async def fetch_branches(self) -> list[dict[str, Any]]:
         return await self._fetch("offices.json")

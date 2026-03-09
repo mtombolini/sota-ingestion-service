@@ -20,6 +20,16 @@ class TenantResponse(BaseModel):
     is_active: bool
 
 
+class TenantCreateRequest(BaseModel):
+    slug: str = Field(min_length=2, max_length=80, pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    name: str = Field(min_length=1, max_length=200)
+
+
+class TenantUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    is_active: bool | None = None
+
+
 class ProviderJobResponse(BaseModel):
     job_type: str
     label: str

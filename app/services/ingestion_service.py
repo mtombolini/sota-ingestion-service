@@ -199,15 +199,19 @@ class IngestionService:
         return len(records)
 
     def _persist_sales(self, tenant_id: int, run_id: int, records: list[dict], *, provider) -> int:
+        doc_fields = (
+            "external_id", "document_type_id", "number", "branch_external_id",
+            "issued_at", "customer_external_id", "net_amount", "tax_amount",
+            "exempt_amount", "total_amount", "state",
+        )
         for rec in records:
             self._persist_raw(tenant_id, run_id, provider.source_system(), provider.source_endpoint_for_job("sync_sales_documents"), rec)
             n = provider.normalize("sync_sales_documents", rec)
             existing = self.db.scalar(select(SalesDocument).where(SalesDocument.tenant_id == tenant_id, SalesDocument.external_id == n["external_id"]))
             if existing:
-                existing.issued_at = n["issued_at"]
-                existing.total_amount = n["total_amount"]
-                existing.branch_external_id = n["branch_external_id"]
-                existing.customer_external_id = n["customer_external_id"]
+                for field in doc_fields:
+                    if field in n:
+                        setattr(existing, field, n[field])
                 existing.lines.clear()
                 for line in n["lines"]:
                     existing.lines.append(SalesDocumentLine(**line))

@@ -20,10 +20,10 @@ def create_app() -> FastAPI:
 
     @app.get("/", include_in_schema=False)
     def root() -> RedirectResponse:
-        return RedirectResponse(url="/ui", status_code=307)
+        return RedirectResponse(url="/ui/overview", status_code=307)
 
-    @app.get("/ui", include_in_schema=False)
-    def ui() -> FileResponse:
+    @app.get("/ui/{path:path}", include_in_schema=False)
+    def ui_catchall(path: str = "") -> FileResponse:
         return FileResponse(
             _UI_FILE,
             headers={
@@ -32,6 +32,10 @@ def create_app() -> FastAPI:
                 "Expires": "0",
             },
         )
+
+    @app.get("/ui", include_in_schema=False)
+    def ui() -> RedirectResponse:
+        return RedirectResponse(url="/ui/overview", status_code=307)
 
     return app
 

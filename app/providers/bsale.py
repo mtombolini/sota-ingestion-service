@@ -40,8 +40,8 @@ class BsaleProvider(ProviderDefinition):
         ),
         ProviderJobDefinition(
             job_type="sync_sales_documents",
-            label="Ventas",
-            description="Importa documentos de venta y sus lineas.",
+            label="Documentos",
+            description="Importa documentos (boletas, facturas, NC) con detalles, montos neto/iva y tipo.",
         ),
         ProviderJobDefinition(
             job_type="sync_branches",
@@ -204,7 +204,7 @@ class BsaleProvider(ProviderDefinition):
         return {
             "sync_product_catalog": "products.json",
             "sync_stock_snapshot": "stocks.json",
-            "sync_sales_documents": "documents/sales.json",
+            "sync_sales_documents": "documents.json",
             "sync_branches": "offices.json",
         }[job_type]
 

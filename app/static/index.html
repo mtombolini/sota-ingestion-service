@@ -6,21 +6,22 @@
   <title>SotA Ingestion Control Plane</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    const UI_BUILD = '2026-03-08-control-plane'
+    const UI_BUILD = '2026-03-08-sidebar'
     tailwind.config = {
       theme: {
         extend: {
           colors: {
-            bp:      { DEFAULT: '#0B1120', card: '#0F1729', elevated: '#141E33', hover: '#1A2740' },
-            grid:    { DEFAULT: '#1B2B45', strong: '#243658' },
-            line:    { DEFAULT: '#2A4070', bright: '#3B5998' },
-            txt:     { DEFAULT: '#E8ECF2', soft: '#A0ADBF', muted: '#6B7F99', dim: '#3E5573' },
-            blue:    { DEFAULT: '#3B82F6', bright: '#60A5FA', soft: '#1E3A5F', border: '#2563EB', text: '#93C5FD' },
-            red:     { DEFAULT: '#EF4444', soft: '#2A1015', border: '#7F1D1D', text: '#FCA5A5' },
-            amber:   { DEFAULT: '#F59E0B', soft: '#2A2008', border: '#78350F', text: '#FCD34D' },
-            green:   { DEFAULT: '#22C55E', soft: '#0A2015', border: '#166534', text: '#86EFAC' },
-            cyan:    { DEFAULT: '#06B6D4', soft: '#082830', border: '#0E7490', text: '#67E8F9' },
-            white:   { DEFAULT: '#F1F5F9' },
+            bp:      { DEFAULT: '#F5F3EF', card: '#FFFFFF', elevated: '#FAFAF8', hover: '#F0EDE8' },
+            grid:    { DEFAULT: '#E5E1DA', strong: '#D5D0C8' },
+            line:    { DEFAULT: '#D0CBBF', bright: '#B8B2A5' },
+            txt:     { DEFAULT: '#1A1A1A', soft: '#4A4A4A', muted: '#7A7570', dim: '#A8A29E' },
+            blue:    { DEFAULT: '#2563EB', bright: '#3B82F6', soft: '#EFF6FF', border: '#BFDBFE', text: '#1D4ED8' },
+            red:     { DEFAULT: '#DC2626', soft: '#FEF2F2', border: '#FECACA', text: '#B91C1C' },
+            amber:   { DEFAULT: '#D97706', soft: '#FFFBEB', border: '#FDE68A', text: '#92400E' },
+            green:   { DEFAULT: '#16A34A', soft: '#F0FDF4', border: '#BBF7D0', text: '#15803D' },
+            cyan:    { DEFAULT: '#0891B2', soft: '#ECFEFF', border: '#A5F3FC', text: '#0E7490' },
+            white:   { DEFAULT: '#FFFFFF' },
+            sidebar: { DEFAULT: '#FFFFFF', hover: '#F5F3EF', active: '#EFF6FF' },
           },
           fontFamily: {
             sans: ['JetBrains Mono', 'Fira Code', 'monospace'],
@@ -37,24 +38,41 @@
   <style>
     [x-cloak] { display: none !important; }
     body {
-      background-color: #0B1120;
+      background-color: #F5F3EF;
       background-image:
-        linear-gradient(rgba(59,130,246,0.06) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(59,130,246,0.06) 1px, transparent 1px),
-        radial-gradient(circle at top right, rgba(34,197,94,0.12), transparent 28%),
-        radial-gradient(circle at bottom left, rgba(6,182,212,0.10), transparent 24%);
-      background-size: 100px 100px, 100px 100px, auto, auto;
+        linear-gradient(rgba(0,0,0,0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,0,0,0.04) 1px, transparent 1px);
+      background-size: 32px 32px;
     }
     ::-webkit-scrollbar { width: 5px; height: 5px; }
-    ::-webkit-scrollbar-track { background: #0B1120; }
-    ::-webkit-scrollbar-thumb { background: #2A4070; border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: #3B5998; }
+    ::-webkit-scrollbar-track { background: #F5F3EF; }
+    ::-webkit-scrollbar-thumb { background: #D0CBBF; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #B8B2A5; }
     @keyframes spin-slow { to { transform: rotate(360deg); } }
     .spin { animation: spin-slow 0.7s linear infinite; }
-    .glow { box-shadow: 0 0 10px rgba(59, 130, 246, 0.25), 0 0 3px rgba(59, 130, 246, 0.15); }
-    .glow-green { box-shadow: 0 0 12px rgba(34, 197, 94, 0.16); }
+    .glow { box-shadow: 0 0 8px rgba(37, 99, 235, 0.15), 0 0 2px rgba(37, 99, 235, 0.10); }
+    .glow-green { box-shadow: 0 0 8px rgba(22, 163, 74, 0.12); }
     .glass { backdrop-filter: blur(10px); }
     pre { white-space: pre-wrap; word-break: break-all; }
+    .sidebar-transition { transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1), margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+    .fade-label { transition: opacity 0.18s ease; }
+    .info-trigger {
+      display: inline-flex;
+      height: 1.75rem;
+      width: 1.75rem;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #E5E1DA;
+      border-radius: 9999px;
+      background: #FAFAF8;
+      color: #7A7570;
+      transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+    }
+    .info-trigger:hover {
+      border-color: #D0CBBF;
+      background: #FFFFFF;
+      color: #1A1A1A;
+    }
   </style>
 </head>
 <body
@@ -64,737 +82,1021 @@
   x-cloak
   x-effect="activeTab === 'data' && loadDataTab(activeDataTab)"
 >
-  <header class="sticky top-0 z-30 border-b border-grid bg-bp-card/90 glass">
-    <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-      <div class="flex items-center gap-3">
-        <div class="flex h-9 w-9 items-center justify-center rounded border border-line bg-blue-soft">
-          <svg class="h-5 w-5 text-blue-bright" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M4 12h10M4 17h16"/>
+  <!-- LAYOUT: sidebar + main -->
+  <div class="flex min-h-screen">
+
+    <!-- ==================== SIDEBAR ==================== -->
+    <aside
+      class="sidebar-transition fixed inset-y-0 left-0 z-40 flex flex-col border-r border-grid bg-sidebar"
+      :style="`width: ${sidebarOpen ? '260' : '64'}px`"
+    >
+      <!-- Logo + collapse toggle -->
+      <div class="flex h-[57px] items-center gap-3 border-b border-grid px-3" :class="sidebarOpen ? 'justify-between' : 'justify-center'">
+        <div class="flex items-center gap-2.5 overflow-hidden">
+          <div class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded border border-line bg-blue-soft">
+            <svg class="h-5 w-5 text-blue-bright" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M4 12h10M4 17h16"/>
+            </svg>
+          </div>
+          <div x-show="sidebarOpen" class="fade-label min-w-0" x-transition.opacity>
+            <p class="text-[9px] uppercase tracking-[0.28em] text-txt-dim">Control Plane</p>
+            <p class="text-xs font-semibold uppercase tracking-[0.16em] text-txt">SotA Ingestion</p>
+          </div>
+        </div>
+        <button @click="sidebarOpen = !sidebarOpen; localStorage.setItem('sidebar', sidebarOpen)"
+          class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded border border-grid text-txt-muted transition-all hover:border-line hover:text-txt-soft"
+          :class="!sidebarOpen && 'mx-auto mt-1'">
+          <svg class="h-4 w-4 transition-transform" :class="!sidebarOpen && 'rotate-180'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Health + build -->
+      <div class="border-b border-grid px-3 py-3">
+        <div class="flex items-center gap-2" :class="!sidebarOpen && 'justify-center'">
+          <span class="flex h-2 w-2 flex-shrink-0 rounded-full" :class="health && health.status === 'ok' ? 'bg-green' : 'bg-red'"></span>
+          <span x-show="sidebarOpen" class="fade-label text-[10px] font-medium uppercase tracking-wide"
+            :class="health && health.status === 'ok' ? 'text-green-text' : 'text-red-text'"
+            x-text="health && health.status === 'ok' ? 'ONLINE' : (health ? health.status : 'BOOTING')"
+            x-transition.opacity></span>
+        </div>
+        <div x-show="sidebarOpen" class="mt-2 text-[9px] uppercase tracking-wide text-txt-dim" x-text="uiBuild" x-transition.opacity></div>
+      </div>
+
+      <!-- Tenant selector -->
+      <div class="border-b border-grid px-3 py-3" x-show="sidebarOpen" x-transition.opacity>
+        <p class="text-[9px] uppercase tracking-[0.24em] text-txt-dim">Cuenta</p>
+        <p class="mt-1 truncate text-xs font-semibold text-txt" x-text="currentTenant ? currentTenant.name : 'Sin cuentas'"></p>
+        <select x-model="selectedTenantId" @change="changeTenant(selectedTenantId)"
+          class="mt-2 w-full rounded border border-grid bg-bp-elevated px-2 py-1.5 text-[11px] text-txt focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20">
+          <option value="" x-show="tenants.length === 0">Sin tenants</option>
+          <template x-for="tenant in tenants" :key="tenant.id">
+            <option :value="tenant.id" x-text="`${tenant.name} (${tenant.slug})`"></option>
+          </template>
+        </select>
+      </div>
+      <!-- Collapsed tenant icon -->
+      <div class="border-b border-grid px-3 py-3 flex justify-center" x-show="!sidebarOpen">
+        <div class="flex h-8 w-8 items-center justify-center rounded border border-grid text-txt-muted" :title="currentTenant ? currentTenant.name : 'Sin cuenta'">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0H5m14 0h2m-2 0a2 2 0 01-2 2H7"/>
           </svg>
         </div>
-        <div>
-          <p class="text-xs uppercase tracking-[0.28em] text-txt-dim">Control Plane</p>
-          <p class="text-sm font-semibold uppercase tracking-[0.18em] text-white">SotA Ingestion</p>
-        </div>
-        <span class="hidden rounded border border-grid bg-bp px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-txt-soft sm:inline-block" x-text="uiBuild"></span>
-        <span class="inline-flex items-center gap-1.5 rounded border px-2.5 py-1 text-xs font-medium"
-          :class="health && health.status === 'ok' ? 'border-green-border bg-green-soft text-green-text glow-green' : 'border-red-border bg-red-soft text-red-text'">
-          <span class="h-1.5 w-1.5 rounded-full" :class="health && health.status === 'ok' ? 'bg-green' : 'bg-red'"></span>
-          <span x-text="health && health.status === 'ok' ? 'ONLINE' : (health ? health.status : 'BOOTING')"></span>
-        </span>
       </div>
-      <div class="flex items-center gap-2">
-        <button @click="toggleAutoRefresh()"
-          class="rounded border px-3 py-1.5 text-xs font-medium uppercase tracking-wide transition-all"
-          :class="autoRefresh ? 'border-blue-border bg-blue-soft text-blue-text glow' : 'border-grid bg-bp-card text-txt-muted hover:border-line hover:text-txt-soft'">
-          <span x-text="autoRefresh ? 'Auto 5s' : 'Manual'"></span>
-        </button>
-        <button @click="refresh()" :disabled="loading"
-          class="rounded border border-grid bg-bp-card px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft disabled:opacity-40">
-          <span class="flex items-center gap-1.5">
-            <svg class="h-3.5 w-3.5" :class="loading && 'spin'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+
+      <!-- Navigation -->
+      <nav class="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
+        <template x-for="item in navItems" :key="item.id">
+          <a :href="'/ui/' + item.id"
+            @click.prevent="navigate(item.id)"
+            class="group flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs font-medium transition-all"
+            :class="activeTab === item.id
+              ? 'bg-sidebar-active border border-blue-border/40 text-blue-bright glow'
+              : 'text-txt-soft hover:bg-sidebar-hover hover:text-txt border border-transparent'"
+            :title="!sidebarOpen ? item.label : ''">
+            <div class="flex h-5 w-5 flex-shrink-0 items-center justify-center" x-html="item.icon"></div>
+            <span x-show="sidebarOpen" class="fade-label flex-1 truncate uppercase tracking-wide" x-text="item.label" x-transition.opacity></span>
+            <span x-show="sidebarOpen && item.badge !== null"
+              class="fade-label rounded border px-1.5 py-0.5 text-[9px] font-semibold"
+              :class="item.badgeClass ?? 'border-grid bg-bp text-txt-muted'"
+              x-text="item.badge"
+              x-transition.opacity></span>
+          </a>
+        </template>
+      </nav>
+
+      <!-- Sidebar footer -->
+      <div class="mt-auto border-t border-grid">
+        <!-- Account nav item -->
+        <a href="/ui/account" @click.prevent="navigate('account')"
+          class="group flex items-center gap-3 px-5 py-3 text-xs font-medium transition-all"
+          :class="activeTab === 'account'
+            ? 'bg-sidebar-active text-blue-bright'
+            : 'text-txt-soft hover:bg-sidebar-hover hover:text-txt'"
+          :title="!sidebarOpen ? 'Cuenta' : ''">
+          <div class="flex h-5 w-5 flex-shrink-0 items-center justify-center" x-html="_navIcons.account"></div>
+          <span x-show="sidebarOpen" class="fade-label flex-1 truncate uppercase tracking-wide" x-transition.opacity>Cuenta</span>
+          <span x-show="sidebarOpen && tenants.length"
+            class="fade-label rounded border border-grid bg-bp px-1.5 py-0.5 text-[9px] font-semibold text-txt-muted"
+            x-text="tenants.length"
+            x-transition.opacity></span>
+        </a>
+        <!-- Refresh controls -->
+        <div class="flex items-center gap-1 border-t border-grid px-3 py-2" :class="!sidebarOpen && 'justify-center'">
+          <button @click="toggleAutoRefresh()"
+            class="flex h-8 items-center gap-1.5 rounded border px-2 text-[10px] font-medium uppercase tracking-wide transition-all"
+            :class="autoRefresh ? 'border-blue-border bg-blue-soft text-blue-text' : 'border-grid bg-bp-card text-txt-muted hover:border-line hover:text-txt-soft'"
+            :title="autoRefresh ? 'Auto-refresh ON (5s)' : 'Manual refresh'">
+            <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            <span x-show="sidebarOpen" x-text="autoRefresh ? '5s' : 'Off'" x-transition.opacity></span>
+          </button>
+          <button @click="refresh()" :disabled="loading"
+            class="flex h-8 items-center gap-1.5 rounded border border-grid bg-bp-card px-2 text-[10px] font-medium uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft disabled:opacity-40"
+            title="Refresh">
+            <svg class="h-3 w-3" :class="loading && 'spin'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
             </svg>
-            <span>Refresh</span>
-          </span>
-        </button>
-      </div>
-    </div>
-  </header>
-
-  <section class="border-b border-grid bg-bp-card/40 px-4 py-4 sm:px-6">
-    <div class="mx-auto grid max-w-7xl gap-4 lg:grid-cols-[1.4fr_1fr]">
-      <div class="rounded-xl border border-grid bg-bp-card/70 p-4">
-        <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Cuenta activa</p>
-        <div class="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p class="text-lg font-semibold text-white" x-text="currentTenant ? currentTenant.name : 'Sin cuentas configuradas'"></p>
-            <p class="text-xs text-txt-muted" x-text="currentTenant ? currentTenant.slug : 'Crea o siembra un tenant para operar el panel.'"></p>
-          </div>
-          <label class="flex min-w-[280px] flex-col gap-1 text-xs uppercase tracking-wide text-txt-dim">
-            <span>Seleccionar cuenta</span>
-            <select x-model="selectedTenantId" @change="changeTenant(selectedTenantId)"
-              class="rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20">
-              <option value="" x-show="tenants.length === 0">Sin tenants</option>
-              <template x-for="tenant in tenants" :key="tenant.id">
-                <option :value="tenant.id" x-text="`${tenant.name} (${tenant.slug})`"></option>
-              </template>
-            </select>
-          </label>
+          </button>
         </div>
+
       </div>
+    </aside>
 
-      <div class="rounded-xl border border-grid bg-bp-card/70 p-4" x-show="overview">
-        <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Pulso operativo</p>
-        <div class="mt-3 grid grid-cols-2 gap-3 text-xs">
-          <div class="rounded border border-grid bg-bp px-3 py-2">
-            <p class="text-txt-dim">Conexiones</p>
-            <p class="mt-1 text-lg font-semibold text-white" x-text="overview?.totals?.connections_total ?? 0"></p>
-          </div>
-          <div class="rounded border border-grid bg-bp px-3 py-2">
-            <p class="text-txt-dim">Saludables</p>
-            <p class="mt-1 text-lg font-semibold text-green-text" x-text="overview?.totals?.connections_healthy ?? 0"></p>
-          </div>
-          <div class="rounded border border-grid bg-bp px-3 py-2">
-            <p class="text-txt-dim">Jobs activos</p>
-            <p class="mt-1 text-lg font-semibold text-blue-text" x-text="overview?.totals?.jobs_enabled ?? 0"></p>
-          </div>
-          <div class="rounded border border-grid bg-bp px-3 py-2">
-            <p class="text-txt-dim">Outbox pendiente</p>
-            <p class="mt-1 text-lg font-semibold text-amber-text" x-text="overview?.totals?.outbox_pending ?? 0"></p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
+    <!-- ==================== MAIN CONTENT ==================== -->
+    <div class="flex-1 sidebar-transition" :style="`margin-left: ${sidebarOpen ? '260' : '64'}px`">
 
-  <nav class="border-b border-grid bg-bp-card/30 px-4 py-3 sm:px-6">
-    <div class="mx-auto flex max-w-7xl flex-wrap gap-1 rounded-lg border border-grid bg-bp p-1">
-      <template x-for="tab in tabs" :key="tab.id">
-        <button @click="activeTab = tab.id"
-          class="flex items-center gap-1.5 rounded px-3.5 py-2 text-xs font-medium uppercase tracking-wide transition-all"
-          :class="activeTab === tab.id ? 'border border-blue-border bg-blue-soft text-blue-bright glow' : 'text-txt-muted hover:text-txt-soft'">
-          <span x-text="tab.label"></span>
-          <span x-show="tab.badge !== null" class="rounded border px-1.5 py-0.5 text-[10px]"
-            :class="tab.badgeClass ?? 'border-grid bg-bp text-txt-muted'" x-text="tab.badge"></span>
-        </button>
-      </template>
-    </div>
-  </nav>
-
-  <main class="mx-auto max-w-7xl px-4 py-5 sm:px-6">
-    <section x-show="!selectedTenantId" class="rounded-xl border border-grid bg-bp-card px-6 py-16 text-center text-sm text-txt-muted">
-      Selecciona una cuenta para cargar el plano operativo.
-    </section>
-
-    <section x-show="selectedTenantId && activeTab === 'overview'" class="space-y-5">
-      <div class="grid gap-4 xl:grid-cols-[1.35fr_1fr]">
-        <div class="rounded-2xl border border-grid bg-bp-card p-5">
-          <div class="flex items-start justify-between gap-4">
+      <!-- Top bar with operational pulse -->
+      <header class="sticky top-0 z-30 border-b border-grid bg-sidebar">
+        <div class="flex h-[57px] items-center justify-between gap-4 px-6">
+          <div class="flex items-center gap-4">
             <div>
-              <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Topologia</p>
-              <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-white">Mapa de integraciones</h2>
-              <p class="mt-2 max-w-2xl text-xs leading-relaxed text-txt-muted">Cada tarjeta representa una conexion concreta del tenant con un provider. El estado mezcla configuracion, ultimo check, jobs habilitados, corridas y errores recientes.</p>
+              <p class="text-[10px] uppercase tracking-[0.28em] text-txt-muted" x-text="_pageTitles[activeTab] ? activeTab.toUpperCase() : 'OVERVIEW'"></p>
+              <h1 class="text-sm font-semibold uppercase tracking-[0.14em] text-txt" x-text="_pageTitles[activeTab] || 'Control Plane'"></h1>
             </div>
-            <button type="button" @click="activeTab = 'connectors'"
-              class="rounded border border-blue-border bg-blue-soft px-3 py-2 text-xs font-semibold uppercase tracking-wide text-blue-text transition-all hover:bg-blue/15">
-              Administrar conexiones
-            </button>
           </div>
-          <div class="mt-5 grid gap-3 md:grid-cols-2">
-            <template x-for="item in (overview?.providers ?? [])" :key="item.connection_id">
-              <div class="rounded-xl border border-grid bg-bp p-4 transition-all hover:border-line">
-                <div class="flex items-start justify-between gap-3">
-                  <div>
-                    <div class="flex flex-wrap items-center gap-2">
-                      <span class="text-sm font-semibold text-white" x-text="item.name"></span>
-                      <span class="rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
-                        :class="connectionStatusClass(item.status)" x-text="connectionStatusLabel(item.status)"></span>
-                      <span x-show="item.is_primary" class="rounded border border-cyan-border bg-cyan-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-text">primary</span>
-                    </div>
-                    <p class="mt-1 text-xs text-txt-muted">
-                      <span x-text="item.provider_label"></span>
-                      <span class="text-grid-strong">·</span>
-                      <span x-text="item.environment"></span>
-                    </p>
-                  </div>
-                  <button type="button" @click="openConnectionEditor(item.connection_id)"
-                    class="rounded border border-grid px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
-                    Editar
+          <!-- Operational pulse (compact) -->
+          <div class="flex items-center gap-4 text-xs" x-show="overview && selectedTenantId">
+            <div class="flex items-center gap-1.5 text-txt-muted">
+              <span class="text-txt font-semibold" x-text="overview?.totals?.connections_total ?? 0"></span> conex.
+            </div>
+            <div class="flex items-center gap-1.5 text-txt-muted">
+              <span class="text-green-text font-semibold" x-text="overview?.totals?.connections_healthy ?? 0"></span> healthy
+            </div>
+            <div class="flex items-center gap-1.5 text-txt-muted">
+              <span class="text-blue-text font-semibold" x-text="overview?.totals?.jobs_enabled ?? 0"></span> jobs
+            </div>
+            <div class="flex items-center gap-1.5 text-txt-muted">
+              <span class="text-amber-text font-semibold" x-text="overview?.totals?.errors_recent ?? 0"></span> errores
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main class="min-h-[calc(100vh-52px)] px-6 py-5">
+        <section x-show="!selectedTenantId" class="rounded-xl border border-line bg-bp-elevated px-6 py-16 text-center text-sm text-txt-soft">
+          Selecciona una cuenta para cargar el plano operativo.
+        </section>
+
+        <!-- ===== OVERVIEW ===== -->
+        <section x-show="selectedTenantId && activeTab === 'overview'" class="space-y-5">
+          <div class="grid gap-4 xl:grid-cols-[1.35fr_1fr]">
+            <div class="rounded-2xl border border-grid bg-bp-card p-5">
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Topologia</p>
+                  <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-txt">Mapa de integraciones</h2>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button type="button" class="info-trigger" title="Ver ayuda de esta seccion"
+                    @click="openInfo('Mapa de integraciones', ['Cada tarjeta representa una conexion concreta del tenant con un provider.', 'El estado mezcla configuracion, ultimo check, jobs habilitados, corridas y errores recientes.'])">
+                    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 8h.01M11 12h1v4h1m-1 5a9 9 0 110-18 9 9 0 010 18z"/>
+                    </svg>
+                  </button>
+                  <button type="button" @click="navigate('connectors')"
+                    class="rounded border border-blue-border bg-blue-soft px-3 py-2 text-xs font-semibold uppercase tracking-wide text-blue-text transition-all hover:bg-blue/15">
+                    Administrar conexiones
                   </button>
                 </div>
-                <div class="mt-4 grid grid-cols-2 gap-2 text-xs">
-                  <div class="rounded border border-grid bg-bp-card px-3 py-2">
-                    <p class="text-txt-dim">Jobs</p>
-                    <p class="mt-1 font-semibold text-white"><span x-text="item.jobs_enabled"></span>/<span x-text="item.jobs_total"></span></p>
-                  </div>
-                  <div class="rounded border border-grid bg-bp-card px-3 py-2">
-                    <p class="text-txt-dim">Errores</p>
-                    <p class="mt-1 font-semibold" :class="item.recent_error_count > 0 ? 'text-red-text' : 'text-green-text'" x-text="item.recent_error_count"></p>
-                  </div>
-                </div>
-                <div class="mt-3 flex flex-wrap gap-2 text-[11px] text-txt-muted">
-                  <span>ultimo run: <span class="text-txt-soft" x-text="item.last_run_status ?? 'sin datos'"></span></span>
-                  <span class="text-grid-strong">·</span>
-                  <span>ultima sync: <span class="text-txt-soft" x-text="fmtDateTime(item.last_sync_at)"></span></span>
-                </div>
               </div>
-            </template>
-          </div>
-        </div>
-
-        <div class="rounded-2xl border border-grid bg-bp-card p-5">
-          <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Providers</p>
-          <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-white">Catalogo registrado</h2>
-          <div class="mt-4 space-y-3">
-            <template x-for="provider in providers" :key="provider.key">
-              <div class="rounded-xl border border-grid bg-bp p-4">
-                <div class="flex items-start justify-between gap-3">
-                  <div>
-                    <p class="text-sm font-semibold text-white" x-text="provider.display_name"></p>
-                    <p class="mt-1 text-xs leading-relaxed text-txt-muted" x-text="provider.description"></p>
-                  </div>
-                  <span class="rounded border border-grid bg-bp-card px-2 py-1 text-[10px] uppercase tracking-wide text-txt-soft" x-text="provider.key"></span>
-                </div>
-                <div class="mt-3 flex flex-wrap gap-1.5">
-                  <template x-for="job in provider.jobs" :key="job.job_type">
-                    <span class="rounded border border-grid bg-bp-card px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-txt-soft" x-text="job.label"></span>
-                  </template>
-                </div>
-              </div>
-            </template>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section x-show="selectedTenantId && activeTab === 'connectors'" class="space-y-5">
-      <div class="grid gap-5 xl:grid-cols-[1.05fr_1.25fr]">
-        <div class="rounded-2xl border border-grid bg-bp-card p-5">
-          <div class="flex items-start justify-between gap-4">
-            <div>
-              <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Onboarding</p>
-              <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-white">Nueva conexion</h2>
-              <p class="mt-2 text-xs leading-relaxed text-txt-muted">Crea una nueva conexion por tenant y provider. El alta crea la conexion y provisiona los jobs. La activacion operacional se maneja despues, desde la tarjeta de la conexion.</p>
-            </div>
-            <button type="button" @click="createOpen = !createOpen; syncCreateDefaults(true)"
-              class="rounded border px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-all"
-              :class="createOpen ? 'border-blue-border bg-blue-soft text-blue-text glow' : 'border-grid bg-bp text-txt-muted hover:border-line hover:text-txt-soft'">
-              <span x-text="createOpen ? 'Ocultar' : 'Crear conexion'"></span>
-            </button>
-          </div>
-
-          <div x-show="createOpen" x-transition class="mt-5 space-y-4 rounded-xl border border-line bg-bp p-4">
-            <div class="grid gap-3 md:grid-cols-2">
-              <label class="text-xs uppercase tracking-wide text-txt-dim">
-                <span class="mb-1 block">Provider</span>
-                <select x-model="createConn.provider" @change="syncCreateDefaults(true)"
-                  class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20">
-                  <template x-for="provider in providers" :key="provider.key">
-                    <option :value="provider.key" x-text="provider.display_name"></option>
-                  </template>
-                </select>
-              </label>
-              <label class="text-xs uppercase tracking-wide text-txt-dim">
-                <span class="mb-1 block">Modo</span>
-                <select x-model="createConn.mode" @change="syncCreateDefaults(true)"
-                  class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20">
-                  <option value="mock">mock</option>
-                  <option value="real">real</option>
-                </select>
-              </label>
-            </div>
-            <div class="grid gap-3 md:grid-cols-2">
-              <label class="text-xs uppercase tracking-wide text-txt-dim">
-                <span class="mb-1 block">Nombre</span>
-                <input x-model="createConn.name" type="text" placeholder="Bsale principal"
-                  class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
-              </label>
-              <label class="text-xs uppercase tracking-wide text-txt-dim">
-                <span class="mb-1 block">Entorno</span>
-                <select x-model="createConn.environment"
-                  class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20">
-                  <template x-for="env in createProviderEnvironments()" :key="env">
-                    <option :value="env" x-text="env"></option>
-                  </template>
-                </select>
-              </label>
-            </div>
-            <label class="block text-xs uppercase tracking-wide text-txt-dim">
-              <span class="mb-1 block">Base URL</span>
-              <input x-model="createConn.base_url" type="url"
-                class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
-            </label>
-            <label class="block text-xs uppercase tracking-wide text-txt-dim" x-show="createConn.mode === 'real'">
-              <span class="mb-1 block">API Token</span>
-              <input x-model="createConn.api_key" type="password" placeholder="Opcional al crear; puedes cargarlo despues"
-                class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
-            </label>
-            <label class="flex items-center gap-2 rounded border border-grid bg-bp px-3 py-2 text-xs text-txt-soft">
-              <input x-model="createConn.is_primary" type="checkbox" class="h-4 w-4 rounded border-grid bg-bp text-blue focus:ring-blue" />
-              <span>Marcar como conexion primaria del provider para esta cuenta</span>
-            </label>
-            <div class="flex flex-wrap items-center gap-2">
-              <button type="button" @click="createConnection()" :disabled="creatingConnection"
-                class="rounded border border-blue-border bg-blue-soft px-4 py-2 text-xs font-semibold uppercase tracking-wide text-blue-text transition-all hover:bg-blue/15 disabled:opacity-40">
-                <span x-text="creatingConnection ? 'Creando...' : 'Crear conexion'"></span>
-              </button>
-              <button type="button" @click="resetCreateForm()"
-                class="rounded border border-grid px-3 py-2 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
-                Limpiar
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div class="rounded-2xl border border-grid bg-bp-card p-5">
-          <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Providers disponibles</p>
-          <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-white">Registry</h2>
-          <div class="mt-4 space-y-3">
-            <template x-for="provider in providers" :key="provider.key">
-              <div class="rounded-xl border border-grid bg-bp p-4">
-                <div class="flex items-start justify-between gap-3">
-                  <div>
-                    <div class="flex items-center gap-2">
-                      <span class="text-sm font-semibold text-white" x-text="provider.display_name"></span>
-                      <span class="rounded border border-grid bg-bp-card px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-txt-soft" x-text="provider.key"></span>
-                    </div>
-                    <p class="mt-1 text-xs leading-relaxed text-txt-muted" x-text="provider.description"></p>
-                  </div>
-                  <a :href="provider.docs_url" target="_blank" rel="noreferrer" x-show="provider.docs_url"
-                    class="rounded border border-grid px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
-                    Docs
-                  </a>
-                </div>
-                <div class="mt-3 grid gap-2 md:grid-cols-2">
-                  <div class="rounded border border-grid bg-bp-card px-3 py-2 text-xs">
-                    <p class="text-txt-dim">Default mock</p>
-                    <p class="mt-1 break-all text-txt-soft" x-text="provider.default_base_urls.mock"></p>
-                  </div>
-                  <div class="rounded border border-grid bg-bp-card px-3 py-2 text-xs">
-                    <p class="text-txt-dim">Default real</p>
-                    <p class="mt-1 break-all text-txt-soft" x-text="provider.default_base_urls.real"></p>
-                  </div>
-                </div>
-              </div>
-            </template>
-          </div>
-        </div>
-      </div>
-
-      <div class="space-y-4">
-        <template x-for="conn in connectors" :key="conn.id">
-          <div class="rounded-2xl border border-grid bg-bp-card p-5 transition-all hover:border-line">
-            <div class="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-              <div class="min-w-0 flex-1">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="text-lg font-semibold text-white" x-text="conn.name"></span>
-                  <span class="rounded border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide"
-                    :class="connectionStatusClass(conn.status)" x-text="connectionStatusLabel(conn.status)"></span>
-                  <span class="rounded border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide"
-                    :class="conn.mode === 'mock' ? 'border-amber-border bg-amber-soft text-amber-text' : 'border-blue-border bg-blue-soft text-blue-text'"
-                    x-text="conn.mode"></span>
-                  <span class="rounded border border-grid bg-bp px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-txt-soft" x-text="conn.environment"></span>
-                  <span x-show="conn.is_primary" class="rounded border border-cyan-border bg-cyan-soft px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-text">primary</span>
-                </div>
-                <p class="mt-2 text-xs uppercase tracking-[0.24em] text-txt-dim">
-                  <span x-text="conn.provider_label"></span>
-                  <span class="text-grid-strong"> / </span>
-                  <span x-text="conn.provider"></span>
-                </p>
-                <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  <div class="rounded-xl border border-grid bg-bp p-3 text-xs">
-                    <p class="text-txt-dim">Base URL</p>
-                    <p class="mt-1 break-all text-txt-soft" x-text="conn.base_url"></p>
-                  </div>
-                  <div class="rounded-xl border border-grid bg-bp p-3 text-xs">
-                    <p class="text-txt-dim">Cuenta provider</p>
-                    <p class="mt-1 text-txt-soft" x-text="conn.provider_account_id ?? 'sin identificar'"></p>
-                  </div>
-                  <div class="rounded-xl border border-grid bg-bp p-3 text-xs">
-                    <p class="text-txt-dim">Jobs</p>
-                    <p class="mt-1 text-white"><span class="font-semibold" x-text="conn.jobs_enabled"></span>/<span x-text="conn.jobs_total"></span></p>
-                  </div>
-                  <div class="rounded-xl border border-grid bg-bp p-3 text-xs">
-                    <p class="text-txt-dim">Ultima sync</p>
-                    <p class="mt-1 text-txt-soft" x-text="fmtDateTime(conn.last_sync_at)"></p>
-                  </div>
-                </div>
-
-                <div x-show="conn.last_check_message" class="mt-4 rounded-xl border px-3 py-3 text-xs"
-                  :class="conn.last_check_ok ? 'border-green-border bg-green-soft text-green-text' : (conn.status === 'config_incomplete' ? 'border-amber-border bg-amber-soft text-amber-text' : 'border-red-border bg-red-soft text-red-text')">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="font-semibold uppercase tracking-wide">Ultimo check</span>
-                    <span class="text-[10px] opacity-70" x-text="fmtDateTime(conn.last_checked_at)"></span>
-                  </div>
-                  <p class="mt-1" x-text="conn.last_check_message"></p>
-                </div>
-
-                <div class="mt-4 rounded-xl border border-grid bg-bp p-4">
-                  <div class="flex items-center justify-between gap-3">
-                    <div>
-                      <p class="text-[11px] uppercase tracking-[0.24em] text-txt-dim">Onboarding</p>
-                      <p class="mt-1 text-xs text-txt-soft">Progreso operativo: <span class="font-semibold text-white" x-text="`${conn.onboarding.progress}%`"></span></p>
-                    </div>
-                    <span class="rounded border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide"
-                      :class="conn.onboarding.ready ? 'border-green-border bg-green-soft text-green-text' : 'border-amber-border bg-amber-soft text-amber-text'"
-                      x-text="conn.onboarding.ready ? 'ready' : (conn.onboarding.next_action ?? 'pending')"></span>
-                  </div>
-                  <div class="mt-3 h-2 rounded-full bg-bp-card">
-                    <div class="h-2 rounded-full transition-all" :class="progressClass(conn.onboarding.progress)" :style="`width:${conn.onboarding.progress}%`"></div>
-                  </div>
-                  <div class="mt-3 grid gap-2 md:grid-cols-2">
-                    <template x-for="step in conn.onboarding.steps" :key="step.key">
-                      <div class="rounded border px-3 py-2 text-xs"
-                        :class="step.done ? 'border-green-border bg-green-soft/60 text-green-text' : 'border-grid bg-bp-card text-txt-muted'">
-                        <div class="flex items-center justify-between gap-2">
-                          <span class="font-semibold uppercase tracking-wide" x-text="step.label"></span>
-                          <span x-text="step.done ? 'ok' : 'pendiente'"></span>
+              <div class="mt-5 grid gap-3 md:grid-cols-2">
+                <template x-for="item in (overview?.providers ?? [])" :key="item.connection_id">
+                  <div class="rounded-xl border border-grid bg-bp p-4 transition-all hover:border-line">
+                    <div class="flex items-start justify-between gap-3">
+                      <div>
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span class="text-sm font-semibold text-txt" x-text="item.name"></span>
+                          <span class="rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                            :class="connectionStatusClass(item.status)" x-text="connectionStatusLabel(item.status)"></span>
+                          <span x-show="item.is_primary" class="rounded border border-cyan-border bg-cyan-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-text">primary</span>
                         </div>
-                        <p class="mt-1 leading-relaxed" x-text="step.detail"></p>
+                        <p class="mt-1 text-xs text-txt-muted">
+                          <span x-text="item.provider_label"></span>
+                          <span class="text-grid-strong">·</span>
+                          <span x-text="item.environment"></span>
+                        </p>
                       </div>
-                    </template>
+                      <button type="button" @click="openConnectionEditor(item.connection_id)"
+                        class="rounded border border-grid px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
+                        Editar
+                      </button>
+                    </div>
+                    <div class="mt-4 grid grid-cols-2 gap-2 text-xs">
+                      <div class="rounded border border-grid bg-bp-card px-3 py-2">
+                        <p class="text-txt-dim">Jobs</p>
+                        <p class="mt-1 font-semibold text-txt"><span x-text="item.jobs_enabled"></span>/<span x-text="item.jobs_total"></span></p>
+                      </div>
+                      <div class="rounded border border-grid bg-bp-card px-3 py-2">
+                        <p class="text-txt-dim">Errores</p>
+                        <p class="mt-1 font-semibold" :class="item.recent_error_count > 0 ? 'text-red-text' : 'text-green-text'" x-text="item.recent_error_count"></p>
+                      </div>
+                    </div>
+                    <div class="mt-3 flex flex-wrap gap-2 text-[11px] text-txt-muted">
+                      <span>ultimo run: <span class="text-txt-soft" x-text="item.last_run_status ?? 'sin datos'"></span></span>
+                      <span class="text-grid-strong">·</span>
+                      <span>ultima sync: <span class="text-txt-soft" x-text="fmtDateTime(item.last_sync_at)"></span></span>
+                    </div>
                   </div>
+                </template>
+              </div>
+            </div>
+
+            <div class="rounded-2xl border border-grid bg-bp-card p-5">
+              <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Providers</p>
+              <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-txt">Catalogo registrado</h2>
+              <div class="mt-4 space-y-3">
+                <template x-for="provider in providers" :key="provider.key">
+                  <div class="rounded-xl border border-grid bg-bp p-4">
+                    <div class="flex items-start justify-between gap-3">
+                      <div>
+                        <div class="flex items-center gap-2">
+                          <p class="text-sm font-semibold text-txt" x-text="provider.display_name"></p>
+                          <button type="button" class="info-trigger" title="Ver detalle del provider"
+                            @click="openInfo(provider.display_name, [provider.description, 'Jobs disponibles: ' + provider.jobs.map(job => job.label).join(', ')])">
+                            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                              <path stroke-linecap="round" stroke-linejoin="round" d="M12 8h.01M11 12h1v4h1m-1 5a9 9 0 110-18 9 9 0 010 18z"/>
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                      <span class="rounded border border-grid bg-bp-card px-2 py-1 text-[10px] uppercase tracking-wide text-txt-soft" x-text="provider.key"></span>
+                    </div>
+                    <div class="mt-3 flex flex-wrap gap-1.5">
+                      <template x-for="job in provider.jobs" :key="job.job_type">
+                        <span class="rounded border border-grid bg-bp-card px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-txt-soft" x-text="job.label"></span>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== CONNECTORS ===== -->
+        <section x-show="selectedTenantId && activeTab === 'connectors'" class="space-y-5">
+          <div class="grid gap-5 xl:grid-cols-[1.05fr_1.25fr]">
+            <div class="rounded-2xl border border-grid bg-bp-card p-5">
+              <div class="flex items-start justify-between gap-4">
+                <div>
+                  <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Alta</p>
+                  <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-txt">Nueva conexion</h2>
+                </div>
+                <div class="flex items-center gap-2">
+                  <button type="button" class="info-trigger" title="Ver ayuda de esta seccion"
+                    @click="openInfo('Nueva conexion', ['Crea una nueva conexion por tenant y provider.', 'El alta crea la conexion y provisiona los jobs.', 'La activacion operacional se maneja despues, desde la tarjeta de la conexion.'])">
+                    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 8h.01M11 12h1v4h1m-1 5a9 9 0 110-18 9 9 0 010 18z"/>
+                    </svg>
+                  </button>
+                  <button type="button" @click="createOpen = !createOpen; syncCreateDefaults(true)"
+                    class="rounded border px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-all"
+                    :class="createOpen ? 'border-blue-border bg-blue-soft text-blue-text glow' : 'border-grid bg-bp text-txt-muted hover:border-line hover:text-txt-soft'">
+                    <span x-text="createOpen ? 'Ocultar' : 'Crear conexion'"></span>
+                  </button>
                 </div>
               </div>
 
-              <div class="w-full xl:w-[320px] xl:flex-shrink-0">
-                <div class="rounded-xl border border-grid bg-bp p-4">
-                  <p class="text-[11px] uppercase tracking-[0.24em] text-txt-dim">Acciones</p>
-                  <div class="mt-3 grid grid-cols-2 gap-2">
-                    <button type="button" @click="openConnectionEditor(conn.id)"
-                      class="rounded border border-blue-border bg-blue-soft px-3 py-2 text-xs font-semibold uppercase tracking-wide text-blue-text transition-all hover:bg-blue/15">
-                      Configurar
-                    </button>
-                    <button type="button" @click="saveAndCheckConnection(conn.id)" :disabled="switchingMode[conn.id]"
-                      class="rounded border border-green-border bg-green-soft px-3 py-2 text-xs font-semibold uppercase tracking-wide text-green-text transition-all hover:bg-green/10 disabled:opacity-40">
-                      Probar
-                    </button>
-                    <button type="button" @click="makePrimary(conn.id)" :disabled="conn.is_primary || switchingMode[conn.id]"
-                      class="rounded border border-cyan-border bg-cyan-soft px-3 py-2 text-xs font-semibold uppercase tracking-wide text-cyan-text transition-all hover:bg-cyan/10 disabled:opacity-40">
-                      Primaria
-                    </button>
-                    <button type="button" @click="toggleJobsForConnection(conn)" :disabled="switchingMode[conn.id]"
-                      class="rounded border border-amber-border bg-amber-soft px-3 py-2 text-xs font-semibold uppercase tracking-wide text-amber-text transition-all hover:bg-amber/10 disabled:opacity-40"
-                      x-text="conn.jobs_enabled === conn.jobs_total && conn.jobs_total > 0 ? 'Desactivar jobs' : 'Activar jobs'"></button>
-                    <button type="button" @click="queueConnectionSync(conn.id)" :disabled="switchingMode[conn.id]"
-                      class="col-span-2 rounded border border-grid bg-bp-card px-3 py-2 text-xs font-semibold uppercase tracking-wide text-txt-soft transition-all hover:border-line hover:text-white disabled:opacity-40">
-                      Sync inicial
-                    </button>
-                    <button type="button" @click="switchConnectionToMock(conn)" :disabled="conn.mode === 'mock' || switchingMode[conn.id]"
-                      class="col-span-2 rounded border border-grid bg-bp px-3 py-2 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft disabled:opacity-40">
-                      Volver a mock
-                    </button>
-                  </div>
-                  <div class="mt-4 rounded border border-grid bg-bp-card px-3 py-2 text-[11px] text-txt-muted">
-                    <p>errores recientes: <span class="font-semibold" :class="conn.recent_error_count > 0 ? 'text-red-text' : 'text-green-text'" x-text="conn.recent_error_count"></span></p>
-                    <p class="mt-1">runs ok: <span class="text-green-text" x-text="conn.successful_runs"></span> · failed: <span class="text-red-text" x-text="conn.failed_runs"></span></p>
-                  </div>
+              <div x-show="createOpen" x-transition class="mt-5 space-y-4 rounded-xl border border-line bg-bp p-4">
+                <div class="grid gap-3 md:grid-cols-2">
+                  <label class="text-xs uppercase tracking-wide text-txt-dim">
+                    <span class="mb-1 block">Provider</span>
+                    <select x-model="createConn.provider" @change="syncCreateDefaults(true)"
+                      class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-txt focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20">
+                      <template x-for="provider in providers" :key="provider.key">
+                        <option :value="provider.key" x-text="provider.display_name"></option>
+                      </template>
+                    </select>
+                  </label>
+                  <label class="text-xs uppercase tracking-wide text-txt-dim">
+                    <span class="mb-1 block">Modo</span>
+                    <select x-model="createConn.mode" @change="syncCreateDefaults(true)"
+                      class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-txt focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20">
+                      <option value="mock">mock</option>
+                      <option value="real">real</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="grid gap-3 md:grid-cols-2">
+                  <label class="text-xs uppercase tracking-wide text-txt-dim">
+                    <span class="mb-1 block">Nombre</span>
+                    <input x-model="createConn.name" type="text" placeholder="Bsale principal"
+                      class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-txt placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
+                  </label>
+                  <label class="text-xs uppercase tracking-wide text-txt-dim">
+                    <span class="mb-1 block">Entorno</span>
+                    <select x-model="createConn.environment"
+                      class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-txt focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20">
+                      <template x-for="env in createProviderEnvironments()" :key="env">
+                        <option :value="env" x-text="env"></option>
+                      </template>
+                    </select>
+                  </label>
+                </div>
+                <label class="block text-xs uppercase tracking-wide text-txt-dim">
+                  <span class="mb-1 block">Base URL</span>
+                  <input x-model="createConn.base_url" type="url"
+                    class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-txt placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
+                </label>
+                <label class="block text-xs uppercase tracking-wide text-txt-dim" x-show="createConn.mode === 'real'">
+                  <span class="mb-1 block">API Token</span>
+                  <input x-model="createConn.api_key" type="password" placeholder="Opcional al crear; puedes cargarlo despues"
+                    class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-txt placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
+                </label>
+                <label class="flex items-center gap-2 rounded border border-grid bg-bp px-3 py-2 text-xs text-txt-soft">
+                  <input x-model="createConn.is_primary" type="checkbox" class="h-4 w-4 rounded border-grid bg-bp text-blue focus:ring-blue" />
+                  <span>Marcar como conexion primaria del provider para esta cuenta</span>
+                </label>
+                <div class="flex flex-wrap items-center gap-2">
+                  <button type="button" @click="createConnection()" :disabled="creatingConnection"
+                    class="rounded border border-blue-border bg-blue-soft px-4 py-2 text-xs font-semibold uppercase tracking-wide text-blue-text transition-all hover:bg-blue/15 disabled:opacity-40">
+                    <span x-text="creatingConnection ? 'Creando...' : 'Crear conexion'"></span>
+                  </button>
+                  <button type="button" @click="resetCreateForm()"
+                    class="rounded border border-grid px-3 py-2 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
+                    Limpiar
+                  </button>
                 </div>
               </div>
             </div>
 
-            <div x-show="openConns[conn.id]" x-transition class="mt-5 rounded-2xl border border-line bg-bp p-5">
-              <div class="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p class="text-[11px] uppercase tracking-[0.24em] text-txt-dim">Editor de conexion</p>
-                  <p class="mt-1 text-xs text-txt-muted">Guardar persiste configuracion. Probar hace un `check` real contra el provider. Si el token queda vacio, se conserva el valor guardado.</p>
+            <div class="rounded-2xl border border-grid bg-bp-card p-5">
+              <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Providers disponibles</p>
+              <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-txt">Registry</h2>
+              <div class="mt-4 space-y-3">
+                <template x-for="provider in providers" :key="provider.key">
+                  <div class="rounded-xl border border-grid bg-bp p-4">
+                    <div class="flex items-start justify-between gap-3">
+                      <div>
+                        <div class="flex items-center gap-2">
+                          <span class="text-sm font-semibold text-txt" x-text="provider.display_name"></span>
+                          <span class="rounded border border-grid bg-bp-card px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-txt-soft" x-text="provider.key"></span>
+                          <button type="button" class="info-trigger" title="Ver detalle del provider"
+                            @click="openInfo(provider.display_name, [provider.description, 'Base mock por defecto: ' + provider.default_base_urls.mock, 'Base real por defecto: ' + provider.default_base_urls.real])">
+                            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                              <path stroke-linecap="round" stroke-linejoin="round" d="M12 8h.01M11 12h1v4h1m-1 5a9 9 0 110-18 9 9 0 010 18z"/>
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                      <a :href="provider.docs_url" target="_blank" rel="noreferrer" x-show="provider.docs_url"
+                        class="rounded border border-grid px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
+                        Docs
+                      </a>
+                    </div>
+                    <div class="mt-3 grid gap-2 md:grid-cols-2">
+                      <div class="rounded border border-grid bg-bp-card px-3 py-2 text-xs">
+                        <p class="text-txt-dim">Default mock</p>
+                        <p class="mt-1 break-all text-txt-soft" x-text="provider.default_base_urls.mock"></p>
+                      </div>
+                      <div class="rounded border border-grid bg-bp-card px-3 py-2 text-xs">
+                        <p class="text-txt-dim">Default real</p>
+                        <p class="mt-1 break-all text-txt-soft" x-text="provider.default_base_urls.real"></p>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-4">
+            <template x-for="conn in connectors" :key="conn.id">
+              <div class="rounded-2xl border border-grid bg-bp-card p-5 transition-all hover:border-line">
+                <div class="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class="text-lg font-semibold text-txt" x-text="conn.name"></span>
+                      <span class="rounded border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide"
+                        :class="connectionStatusClass(conn.status)" x-text="connectionStatusLabel(conn.status)"></span>
+                      <span class="rounded border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide"
+                        :class="conn.mode === 'mock' ? 'border-amber-border bg-amber-soft text-amber-text' : 'border-blue-border bg-blue-soft text-blue-text'"
+                        x-text="conn.mode"></span>
+                      <span class="rounded border border-grid bg-bp px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-txt-soft" x-text="conn.environment"></span>
+                      <span x-show="conn.is_primary" class="rounded border border-cyan-border bg-cyan-soft px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-text">primary</span>
+                    </div>
+                    <p class="mt-2 text-xs uppercase tracking-[0.24em] text-txt-dim">
+                      <span x-text="conn.provider_label"></span>
+                      <span class="text-grid-strong"> / </span>
+                      <span x-text="conn.provider"></span>
+                    </p>
+                    <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <div class="rounded-xl border border-grid bg-bp p-3 text-xs">
+                        <p class="text-txt-dim">Base URL</p>
+                        <p class="mt-1 break-all text-txt-soft" x-text="conn.base_url"></p>
+                      </div>
+                      <div class="rounded-xl border border-grid bg-bp p-3 text-xs">
+                        <p class="text-txt-dim">Cuenta provider</p>
+                        <p class="mt-1 text-txt-soft" x-text="conn.provider_account_id ?? 'sin identificar'"></p>
+                      </div>
+                      <div class="rounded-xl border border-grid bg-bp p-3 text-xs">
+                        <p class="text-txt-dim">Jobs</p>
+                        <p class="mt-1 text-txt"><span class="font-semibold" x-text="conn.jobs_enabled"></span>/<span x-text="conn.jobs_total"></span></p>
+                      </div>
+                      <div class="rounded-xl border border-grid bg-bp p-3 text-xs">
+                        <p class="text-txt-dim">Ultima sync</p>
+                        <p class="mt-1 text-txt-soft" x-text="fmtDateTime(conn.last_sync_at)"></p>
+                      </div>
+                    </div>
+
+                    <div x-show="conn.last_check_message" class="mt-4 rounded-xl border px-3 py-3 text-xs"
+                      :class="conn.last_check_ok ? 'border-green-border bg-green-soft text-green-text' : (conn.status === 'config_incomplete' ? 'border-amber-border bg-amber-soft text-amber-text' : 'border-red-border bg-red-soft text-red-text')">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span class="font-semibold uppercase tracking-wide">Ultimo check</span>
+                        <span class="text-[10px] opacity-70" x-text="fmtDateTime(conn.last_checked_at)"></span>
+                      </div>
+                      <p class="mt-1" x-text="conn.last_check_message"></p>
+                    </div>
+
+                    <div class="mt-4 rounded-xl border border-grid bg-bp p-4">
+                      <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center gap-2">
+                          <p class="text-[11px] uppercase tracking-[0.24em] text-txt-dim">Onboarding</p>
+                          <button type="button" class="info-trigger" title="Ver detalle del onboarding"
+                            @click="openInfo(`Onboarding · ${conn.name}`, onboardingInfoLines(conn.onboarding))">
+                            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                              <path stroke-linecap="round" stroke-linejoin="round" d="M12 8h.01M11 12h1v4h1m-1 5a9 9 0 110-18 9 9 0 010 18z"/>
+                            </svg>
+                          </button>
+                        </div>
+                        <div class="flex items-center gap-2">
+                          <span class="rounded border border-grid bg-bp-card px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-txt-soft"
+                            x-text="`${conn.onboarding.progress}%`"></span>
+                          <span class="rounded border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide"
+                            :class="conn.onboarding.ready ? 'border-green-border bg-green-soft text-green-text' : 'border-amber-border bg-amber-soft text-amber-text'"
+                            x-text="conn.onboarding.ready ? 'ready' : (conn.onboarding.next_action ?? 'pending')"></span>
+                        </div>
+                      </div>
+                      <div class="mt-3 h-2 rounded-full bg-bp-card">
+                        <div class="h-2 rounded-full transition-all" :class="progressClass(conn.onboarding.progress)" :style="`width:${conn.onboarding.progress}%`"></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="w-full xl:w-[320px] xl:flex-shrink-0">
+                    <div class="rounded-xl border border-grid bg-bp p-4">
+                      <p class="text-[11px] uppercase tracking-[0.24em] text-txt-dim">Acciones</p>
+                      <div class="mt-3 grid grid-cols-2 gap-2">
+                        <button type="button" @click="openConnectionEditor(conn.id)"
+                          class="rounded border border-blue-border bg-blue-soft px-3 py-2 text-xs font-semibold uppercase tracking-wide text-blue-text transition-all hover:bg-blue/15">
+                          Configurar
+                        </button>
+                        <button type="button" @click.prevent.stop="runConnectionCheck(conn)"
+                          class="rounded border border-green-border bg-green-soft px-3 py-2 text-xs font-semibold uppercase tracking-wide text-green-text transition-all hover:bg-green/10">
+                          Probar
+                        </button>
+                        <button type="button" @click="makePrimary(conn.id)"
+                          class="rounded border border-cyan-border bg-cyan-soft px-3 py-2 text-xs font-semibold uppercase tracking-wide text-cyan-text transition-all hover:bg-cyan/10">
+                          Primaria
+                        </button>
+                        <button type="button" @click="toggleJobsForConnection(conn)"
+                          class="rounded border border-amber-border bg-amber-soft px-3 py-2 text-xs font-semibold uppercase tracking-wide text-amber-text transition-all hover:bg-amber/10"
+                          x-text="conn.jobs_enabled === conn.jobs_total && conn.jobs_total > 0 ? 'Desactivar jobs' : 'Activar jobs'"></button>
+                        <button type="button" @click="queueConnectionSync(conn.id)"
+                          class="col-span-2 rounded border border-grid bg-bp-card px-3 py-2 text-xs font-semibold uppercase tracking-wide text-txt-soft transition-all hover:border-line hover:text-txt">
+                          Sync inicial
+                        </button>
+                        <button type="button" @click="switchConnectionToMock(conn)"
+                          class="col-span-2 rounded border border-grid bg-bp px-3 py-2 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
+                          Volver a mock
+                        </button>
+                      </div>
+                      <div class="mt-4 rounded border border-grid bg-bp-card px-3 py-2 text-[11px] text-txt-muted">
+                        <p>errores recientes: <span class="font-semibold" :class="conn.recent_error_count > 0 ? 'text-red-text' : 'text-green-text'" x-text="conn.recent_error_count"></span></p>
+                        <p class="mt-1">runs ok: <span class="text-green-text" x-text="conn.successful_runs"></span> · failed: <span class="text-red-text" x-text="conn.failed_runs"></span></p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <button type="button" @click="openConns = { ...openConns, [conn.id]: false }"
-                  class="rounded border border-grid px-3 py-2 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
-                  Cerrar
+
+                <div x-show="openConns[conn.id]" x-transition class="mt-5 rounded-2xl border border-line bg-bp p-5">
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p class="text-[11px] uppercase tracking-[0.24em] text-txt-dim">Editor de conexion</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <button type="button" class="info-trigger" title="Ver ayuda del editor"
+                        @click="openInfo('Editor de conexion', ['Guardar persiste configuracion.', 'Probar hace un check real contra el provider.', 'Si el token queda vacio, se conserva el valor guardado.'])">
+                        <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M12 8h.01M11 12h1v4h1m-1 5a9 9 0 110-18 9 9 0 010 18z"/>
+                        </svg>
+                      </button>
+                      <button type="button" @click="openConns = { ...openConns, [conn.id]: false }"
+                        class="rounded border border-grid px-3 py-2 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
+                        Cerrar
+                      </button>
+                    </div>
+                  </div>
+                  <div class="mt-4 grid gap-3 lg:grid-cols-2">
+                    <label class="text-xs uppercase tracking-wide text-txt-dim">
+                      <span class="mb-1 block">Nombre</span>
+                      <input x-model="connName[conn.id]" @input="markConnectionDirty(conn.id)" type="text"
+                        class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-txt placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
+                    </label>
+                    <label class="text-xs uppercase tracking-wide text-txt-dim">
+                      <span class="mb-1 block">Modo</span>
+                      <select x-model="connMode[conn.id]" @change="markConnectionDirty(conn.id); syncConnectionDefaults(conn.id, conn.provider, true)"
+                        class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-txt focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20">
+                        <option value="mock">mock</option>
+                        <option value="real">real</option>
+                      </select>
+                    </label>
+                    <label class="text-xs uppercase tracking-wide text-txt-dim">
+                      <span class="mb-1 block">Entorno</span>
+                      <select x-model="connEnv[conn.id]" @change="markConnectionDirty(conn.id)"
+                        class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-txt focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20">
+                        <template x-for="env in providerEnvironments(conn.provider)" :key="env">
+                          <option :value="env" x-text="env"></option>
+                        </template>
+                      </select>
+                    </label>
+                    <label class="text-xs uppercase tracking-wide text-txt-dim">
+                      <span class="mb-1 block">Base URL</span>
+                      <input x-model="connUrl[conn.id]" @input="markConnectionDirty(conn.id)" type="url"
+                        class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-txt placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
+                    </label>
+                  </div>
+                  <div class="mt-3 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.18em]">
+                    <span class="rounded-full border px-2.5 py-1 font-semibold"
+                      :class="(connMode[conn.id] ?? conn.mode) === 'real' ? 'border-blue-border bg-blue-soft text-blue-text' : 'border-amber-border bg-amber-soft text-amber-text'"
+                      x-text="(connMode[conn.id] ?? conn.mode) === 'real' ? 'Borrador real' : 'Borrador mock'"></span>
+                    <button type="button" x-show="(connMode[conn.id] ?? conn.mode) === 'real'" class="info-trigger" title="Ver flujo modo real"
+                      @click="openInfo('Flujo modo real', ['Primero guarda la configuracion real.', 'Si vienes desde mock, debes cargar un token real nuevo.', 'Si ya estabas en real y dejas el token vacio, se conserva el secreto guardado.', 'Despues usa Guardar y probar o el boton Probar para validar la cuenta contra Bsale.'])">
+                      <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 8h.01M11 12h1v4h1m-1 5a9 9 0 110-18 9 9 0 010 18z"/>
+                      </svg>
+                    </button>
+                    <span x-show="editorDirty[conn.id]" class="rounded-full border border-cyan-border bg-cyan-soft px-2.5 py-1 font-semibold text-cyan-text">
+                      Cambios sin guardar
+                    </span>
+                    <span x-show="(connMode[conn.id] ?? conn.mode) === 'real' && !conn.has_secret && !(connTok[conn.id] ?? '').trim()"
+                      class="rounded-full border border-red-border bg-red-soft px-2.5 py-1 font-semibold text-red-text">
+                      Falta token
+                    </span>
+                  </div>
+                  <label class="mt-3 block text-xs uppercase tracking-wide text-txt-dim" x-show="connMode[conn.id] === 'real'">
+                    <span class="mb-1 block">API Token</span>
+                    <input x-model="connTok[conn.id]" @input="markConnectionDirty(conn.id)" type="password" placeholder="Deja vacio para conservar el secreto actual"
+                      class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-txt placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
+                  </label>
+                  <div x-show="editorStatus[conn.id]" class="mt-3 rounded border px-3 py-3 text-xs leading-relaxed"
+                    :class="editorStatusType[conn.id] === 'error' ? 'border-red-border bg-red-soft text-red-text' : 'border-green-border bg-green-soft text-green-text'">
+                    <p x-text="editorStatus[conn.id]"></p>
+                  </div>
+                  <div class="mt-4 flex flex-wrap items-center gap-2">
+                    <button type="button" @click.prevent.stop="saveConnectionConfig(conn.id)"
+                      class="rounded border border-blue-border bg-blue-soft px-4 py-2 text-xs font-semibold uppercase tracking-wide text-blue-text transition-all hover:bg-blue/15">
+                      <span x-text="(connMode[conn.id] ?? conn.mode) === 'real' ? 'Guardar real' : 'Guardar mock'"></span>
+                    </button>
+                    <button type="button" @click.prevent.stop="saveAndCheckConnection(conn.id)"
+                      class="rounded border border-green-border bg-green-soft px-4 py-2 text-xs font-semibold uppercase tracking-wide text-green-text transition-all hover:bg-green/10">
+                      Guardar y probar
+                    </button>
+                    <button type="button" @click.prevent.stop="resetConnectionDraft(conn.id)"
+                      class="rounded border border-grid bg-bp px-4 py-2 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
+                      Resetear cambios
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <div x-show="connectors.length === 0" class="rounded-xl border border-grid bg-bp-card px-6 py-16 text-center text-sm text-txt-muted">
+              Esta cuenta aun no tiene conexiones configuradas.
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== JOBS ===== -->
+        <section x-show="selectedTenantId && activeTab === 'jobs'" class="space-y-3">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Ejecucion</p>
+              <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-txt">Jobs provisionados</h2>
+            </div>
+            <div class="flex items-center gap-2">
+              <button type="button" class="info-trigger" title="Ver ayuda de esta seccion"
+                @click="openInfo('Jobs provisionados', ['Los jobs ahora cuelgan de una conexion concreta.', 'Puedes tener multiples conexiones del mismo provider dentro de la misma cuenta sin mezclar ejecuciones.'])">
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 8h.01M11 12h1v4h1m-1 5a9 9 0 110-18 9 9 0 010 18z"/>
+                </svg>
+              </button>
+              <button type="button" @click="triggerAll()"
+                class="rounded border border-grid bg-bp-card px-4 py-2 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
+                Run all habilitados
+              </button>
+            </div>
+          </div>
+
+          <div class="grid gap-3 lg:grid-cols-2">
+            <template x-for="job in jobs" :key="job.id">
+              <div class="rounded-xl border border-grid bg-bp-card p-4 transition-all hover:border-line">
+                <div class="flex items-start justify-between gap-4">
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class="text-sm font-semibold text-txt" x-text="job.job_label"></span>
+                      <span class="rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                        :class="job.is_enabled ? 'border-green-border bg-green-soft text-green-text' : 'border-grid bg-bp text-txt-dim'"
+                        x-text="job.is_enabled ? 'enabled' : 'disabled'"></span>
+                      <button type="button" class="info-trigger" title="Ver detalle del job"
+                        @click="openInfo(job.job_label, jobDescription(job.provider, job.job_type))">
+                        <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M12 8h.01M11 12h1v4h1m-1 5a9 9 0 110-18 9 9 0 010 18z"/>
+                        </svg>
+                      </button>
+                    </div>
+                    <p class="mt-1 text-xs text-txt-muted"><span x-text="job.provider_label"></span> · <span x-text="job.connection_name"></span></p>
+                    <div class="mt-3 flex flex-wrap gap-2 text-[10px] uppercase tracking-wide text-txt-dim">
+                      <span class="rounded border border-grid bg-bp px-2 py-1" x-text="job.job_type"></span>
+                      <span class="rounded border border-grid bg-bp px-2 py-1">conn #<span x-text="job.connection_id"></span></span>
+                    </div>
+                  </div>
+                  <button type="button" @click="triggerJob(job.id)"
+                    class="rounded border border-blue-border bg-blue-soft px-4 py-2 text-xs font-semibold uppercase tracking-wide text-blue-text transition-all hover:bg-blue/15">
+                    <span x-text="triggering[job.id] ? '...' : 'Run'"></span>
+                  </button>
+                </div>
+              </div>
+            </template>
+          </div>
+          <div x-show="jobs.length === 0" class="rounded-xl border border-grid bg-bp-card px-6 py-16 text-center text-sm text-txt-muted">
+            Sin jobs provisionados para esta cuenta.
+          </div>
+        </section>
+
+        <!-- ===== RUNS ===== -->
+        <section x-show="selectedTenantId && activeTab === 'runs'" class="space-y-4">
+          <div>
+            <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Observabilidad</p>
+            <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-txt">Corridas</h2>
+          </div>
+          <div class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
+            <table class="w-full text-sm">
+              <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
+                <tr>
+                  <th class="px-4 py-3 text-left font-semibold">Run</th>
+                  <th class="px-4 py-3 text-left font-semibold">Conexion</th>
+                  <th class="px-4 py-3 text-left font-semibold">Job</th>
+                  <th class="px-4 py-3 text-left font-semibold">Estado</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Raw / Norm</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Inicio</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="(run, idx) in runs" :key="run.id">
+                  <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
+                    <td class="px-4 py-3 text-xs text-txt-dim">#<span x-text="run.id"></span></td>
+                    <td class="px-4 py-3 text-xs text-txt-soft"><span x-text="run.connection_name"></span><span class="text-txt-dim"> · </span><span x-text="run.provider_label"></span></td>
+                    <td class="px-4 py-3 text-xs text-txt-soft" x-text="run.job_type"></td>
+                    <td class="px-4 py-3">
+                      <span class="rounded border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide"
+                        :class="runStatusClass(run.status)" x-text="run.status"></span>
+                    </td>
+                    <td class="hidden px-4 py-3 text-xs text-txt-dim md:table-cell">
+                      <span class="text-txt-soft" x-text="run.records_raw"></span>
+                      <span class="mx-1 text-grid-strong">/</span>
+                      <span class="text-txt-soft" x-text="run.records_normalized"></span>
+                    </td>
+                    <td class="hidden px-4 py-3 text-xs text-txt-dim md:table-cell" x-text="fmtDateTime(run.started_at)"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+            <div x-show="runs.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin corridas recientes.</div>
+          </div>
+        </section>
+
+        <!-- ===== DATA ===== -->
+        <section x-show="selectedTenantId && activeTab === 'data'" class="space-y-4">
+          <div>
+            <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Modelo canonico</p>
+            <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-txt">Data</h2>
+          </div>
+
+          <div class="flex w-fit gap-1 rounded-lg border border-grid bg-bp p-1">
+            <template x-for="dt in dataTabs" :key="dt.id">
+              <button @click="activeDataTab = dt.id; loadDataTab(dt.id)"
+                class="rounded px-3 py-1.5 text-xs font-medium uppercase tracking-wide transition-all"
+                :class="activeDataTab === dt.id ? 'border border-blue-border bg-blue-soft text-blue-bright glow' : 'text-txt-muted hover:text-txt-soft'">
+                <span x-text="dt.label"></span>
+                <span x-show="dataStats[dt.id] !== undefined" class="ml-1 text-txt-dim" x-text="'(' + dataStats[dt.id] + ')' "></span>
+              </button>
+            </template>
+          </div>
+
+          <div x-show="dataLoading" class="rounded-xl border border-grid bg-bp-card px-6 py-14 text-center text-sm text-txt-muted">Cargando...</div>
+
+          <div x-show="activeDataTab === 'products' && !dataLoading" class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
+            <div x-show="dataProducts.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin productos.</div>
+            <table x-show="dataProducts.length > 0" class="w-full text-sm">
+              <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
+                <tr>
+                  <th class="px-4 py-3 text-left font-semibold">ID ext.</th>
+                  <th class="px-4 py-3 text-left font-semibold">SKU</th>
+                  <th class="px-4 py-3 text-left font-semibold">Nombre</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Categoria</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Unidad</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="(p, idx) in dataProducts" :key="p.id">
+                  <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
+                    <td class="px-4 py-3 text-xs text-txt-dim" x-text="p.external_id"></td>
+                    <td class="px-4 py-3 text-xs text-txt-soft" x-text="p.sku ?? '—'"></td>
+                    <td class="px-4 py-3 text-sm font-medium text-txt" x-text="p.name"></td>
+                    <td class="hidden px-4 py-3 text-xs text-txt-muted md:table-cell" x-text="p.category ?? '—'"></td>
+                    <td class="hidden px-4 py-3 text-xs text-txt-muted md:table-cell" x-text="p.unit ?? '—'"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+
+          <div x-show="activeDataTab === 'branches' && !dataLoading" class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
+            <div x-show="dataBranches.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin sucursales.</div>
+            <table x-show="dataBranches.length > 0" class="w-full text-sm">
+              <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
+                <tr>
+                  <th class="px-4 py-3 text-left font-semibold">ID ext.</th>
+                  <th class="px-4 py-3 text-left font-semibold">Nombre</th>
+                  <th class="px-4 py-3 text-left font-semibold">Codigo</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="(b, idx) in dataBranches" :key="b.id">
+                  <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
+                    <td class="px-4 py-3 text-xs text-txt-dim" x-text="b.external_id"></td>
+                    <td class="px-4 py-3 text-sm font-medium text-txt" x-text="b.name"></td>
+                    <td class="px-4 py-3 text-xs text-txt-muted" x-text="b.code ?? '—'"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+
+          <div x-show="activeDataTab === 'stock' && !dataLoading" class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
+            <div x-show="dataStock.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin stock.</div>
+            <table x-show="dataStock.length > 0" class="w-full text-sm">
+              <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
+                <tr>
+                  <th class="px-4 py-3 text-left font-semibold">Producto</th>
+                  <th class="px-4 py-3 text-left font-semibold">Sucursal</th>
+                  <th class="px-4 py-3 text-left font-semibold">Cantidad</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Capturado</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="(s, idx) in dataStock" :key="s.id">
+                  <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
+                    <td class="px-4 py-3 text-xs text-txt-soft" x-text="s.product_external_id"></td>
+                    <td class="px-4 py-3 text-xs text-txt-soft" x-text="s.branch_external_id"></td>
+                    <td class="px-4 py-3 text-sm font-semibold text-txt" x-text="s.quantity"></td>
+                    <td class="hidden px-4 py-3 text-xs text-txt-dim md:table-cell" x-text="fmtDateTime(s.captured_at)"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+
+          <div x-show="activeDataTab === 'sales' && !dataLoading" class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
+            <div x-show="dataSales.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin ventas.</div>
+            <table x-show="dataSales.length > 0" class="w-full text-sm">
+              <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
+                <tr>
+                  <th class="px-4 py-3 text-left font-semibold">ID ext.</th>
+                  <th class="px-4 py-3 text-left font-semibold">Sucursal</th>
+                  <th class="px-4 py-3 text-left font-semibold">Cliente</th>
+                  <th class="px-4 py-3 text-left font-semibold">Total</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Emitido</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="(sale, idx) in dataSales" :key="sale.id">
+                  <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
+                    <td class="px-4 py-3 text-xs text-txt-dim" x-text="sale.external_id"></td>
+                    <td class="px-4 py-3 text-xs text-txt-soft" x-text="sale.branch_external_id ?? '—'"></td>
+                    <td class="px-4 py-3 text-xs text-txt-soft" x-text="sale.customer_external_id ?? '—'"></td>
+                    <td class="px-4 py-3 text-sm font-semibold text-txt" x-text="'$' + Number(sale.total_amount).toLocaleString('es-CL')"></td>
+                    <td class="hidden px-4 py-3 text-xs text-txt-dim md:table-cell" x-text="fmtDateTime(sale.issued_at)"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- ===== ERRORS ===== -->
+        <section x-show="selectedTenantId && activeTab === 'errors'" class="space-y-3">
+          <div>
+            <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Incidentes</p>
+            <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-txt">Errores</h2>
+          </div>
+          <template x-for="err in errors" :key="err.id">
+            <div class="rounded-xl border border-red-border bg-bp-card p-4">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="rounded border border-red-border bg-red-soft px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-red-text" x-text="err.severity"></span>
+                    <span class="rounded border border-grid bg-bp px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-txt-soft" x-text="err.object_name"></span>
+                    <span x-show="err.job_run_id" class="text-[10px] uppercase tracking-wide text-txt-dim">run #<span x-text="err.job_run_id"></span></span>
+                  </div>
+                  <p class="mt-3 text-sm leading-relaxed text-txt" x-text="err.message"></p>
+                  <p class="mt-2 text-xs text-txt-dim" x-text="fmtDateTime(err.created_at)"></p>
+                </div>
+                <button type="button" x-show="err.payload" @click="err._open = !err._open"
+                  class="rounded border border-grid px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
+                  <span x-text="err._open ? 'Ocultar' : 'Payload'"></span>
                 </button>
               </div>
-              <div class="mt-4 grid gap-3 lg:grid-cols-2">
+              <pre x-show="err._open" x-transition class="mt-3 overflow-x-auto rounded border border-grid bg-bp p-3 text-xs text-txt-soft" x-text="JSON.stringify(err.payload, null, 2)"></pre>
+            </div>
+          </template>
+          <div x-show="errors.length === 0" class="rounded-xl border border-grid bg-bp-card px-6 py-16 text-center text-sm text-txt-muted">Sin errores registrados.</div>
+        </section>
+
+        <!-- ===== AUDIT ===== -->
+        <section x-show="selectedTenantId && activeTab === 'audit'" class="space-y-3">
+          <div>
+            <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Governance</p>
+            <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-txt">Audit trail</h2>
+          </div>
+          <template x-for="row in auditLogs" :key="row.id">
+            <div class="rounded-xl border border-grid bg-bp-card p-4">
+              <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="rounded border border-cyan-border bg-cyan-soft px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-text" x-text="row.action"></span>
+                    <span class="rounded border border-grid bg-bp px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-txt-soft" x-text="row.target_type"></span>
+                    <span class="text-[10px] uppercase tracking-wide text-txt-dim" x-text="row.actor"></span>
+                  </div>
+                  <p class="mt-2 text-sm text-txt" x-text="row.target_label ?? row.target_id ?? 'sin etiqueta'"></p>
+                  <p class="mt-1 text-xs text-txt-dim" x-text="fmtDateTime(row.created_at)"></p>
+                </div>
+                <pre class="w-full overflow-x-auto rounded border border-grid bg-bp p-3 text-xs text-txt-soft md:w-[420px]" x-text="JSON.stringify(row.payload ?? {}, null, 2)"></pre>
+              </div>
+            </div>
+          </template>
+          <div x-show="auditLogs.length === 0" class="rounded-xl border border-grid bg-bp-card px-6 py-16 text-center text-sm text-txt-muted">Sin eventos auditados.</div>
+        </section>
+
+        <!-- ===== ACCOUNT ===== -->
+        <section x-show="activeTab === 'account'" class="space-y-5">
+          <!-- Create tenant form -->
+          <div class="rounded-2xl border border-grid bg-bp-card p-5">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Administracion</p>
+                <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-txt">Cuentas (Tenants)</h2>
+              </div>
+              <div class="flex items-center gap-2">
+                <button type="button" class="info-trigger" title="Ver ayuda de esta seccion"
+                  @click="openInfo('Cuentas', ['Gestiona las cuentas del sistema.', 'Cada tenant opera de forma aislada con sus propias conexiones, jobs y datos.'])">
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 8h.01M11 12h1v4h1m-1 5a9 9 0 110-18 9 9 0 010 18z"/>
+                  </svg>
+                </button>
+                <button type="button" @click="accountCreateOpen = !accountCreateOpen"
+                  class="rounded border px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-all"
+                  :class="accountCreateOpen ? 'border-blue-border bg-blue-soft text-blue-text glow' : 'border-grid bg-bp text-txt-muted hover:border-line hover:text-txt-soft'">
+                  <span x-text="accountCreateOpen ? 'Ocultar' : 'Nuevo tenant'"></span>
+                </button>
+              </div>
+            </div>
+
+            <div x-show="accountCreateOpen" x-transition class="mt-5 space-y-3 rounded-xl border border-line bg-bp p-4">
+              <div class="grid gap-3 md:grid-cols-2">
                 <label class="text-xs uppercase tracking-wide text-txt-dim">
                   <span class="mb-1 block">Nombre</span>
-                  <input x-model="connName[conn.id]" type="text"
-                    class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
+                  <input x-model="newTenant.name" type="text" placeholder="Mi Empresa"
+                    class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-txt placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
                 </label>
                 <label class="text-xs uppercase tracking-wide text-txt-dim">
-                  <span class="mb-1 block">Modo</span>
-                  <select x-model="connMode[conn.id]" @change="syncConnectionDefaults(conn.id, conn.provider, true)"
-                    class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20">
-                    <option value="mock">mock</option>
-                    <option value="real">real</option>
-                  </select>
-                </label>
-                <label class="text-xs uppercase tracking-wide text-txt-dim">
-                  <span class="mb-1 block">Entorno</span>
-                  <select x-model="connEnv[conn.id]"
-                    class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20">
-                    <template x-for="env in providerEnvironments(conn.provider)" :key="env">
-                      <option :value="env" x-text="env"></option>
-                    </template>
-                  </select>
-                </label>
-                <label class="text-xs uppercase tracking-wide text-txt-dim">
-                  <span class="mb-1 block">Base URL</span>
-                  <input x-model="connUrl[conn.id]" type="url"
-                    class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
+                  <span class="mb-1 block">Slug (identificador unico)</span>
+                  <input x-model="newTenant.slug" type="text" placeholder="mi-empresa"
+                    class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-txt placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
                 </label>
               </div>
-              <label class="mt-3 block text-xs uppercase tracking-wide text-txt-dim" x-show="connMode[conn.id] === 'real'">
-                <span class="mb-1 block">API Token</span>
-                <input x-model="connTok[conn.id]" type="password" placeholder="Deja vacio para conservar el secreto actual"
-                  class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-white placeholder-txt-dim focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
-              </label>
-              <div class="mt-4 flex flex-wrap items-center gap-2">
-                <button type="button" @click="saveConnectionConfig(conn.id)" :disabled="switchingMode[conn.id]"
+              <div class="flex items-center gap-2">
+                <button type="button" @click="createTenant()" :disabled="accountCreating"
                   class="rounded border border-blue-border bg-blue-soft px-4 py-2 text-xs font-semibold uppercase tracking-wide text-blue-text transition-all hover:bg-blue/15 disabled:opacity-40">
-                  Guardar configuracion
+                  <span x-text="accountCreating ? 'Creando...' : 'Crear tenant'"></span>
                 </button>
-                <button type="button" @click="saveAndCheckConnection(conn.id)" :disabled="switchingMode[conn.id]"
-                  class="rounded border border-green-border bg-green-soft px-4 py-2 text-xs font-semibold uppercase tracking-wide text-green-text transition-all hover:bg-green/10 disabled:opacity-40">
-                  Guardar y probar
+                <button type="button" @click="newTenant = {name: '', slug: ''}"
+                  class="rounded border border-grid px-3 py-2 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
+                  Limpiar
                 </button>
               </div>
             </div>
           </div>
-        </template>
 
-        <div x-show="connectors.length === 0" class="rounded-xl border border-grid bg-bp-card px-6 py-16 text-center text-sm text-txt-muted">
-          Esta cuenta aun no tiene conexiones configuradas.
-        </div>
-      </div>
-    </section>
+          <!-- Tenant list -->
+          <div class="space-y-3">
+            <template x-for="tenant in tenants" :key="tenant.id">
+              <div class="rounded-2xl border bg-bp-card p-5 transition-all"
+                :class="tenant.id === Number(selectedTenantId) ? 'border-blue-border' : 'border-grid hover:border-line'">
+                <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class="text-lg font-semibold text-txt" x-text="tenant.name"></span>
+                      <span class="rounded border border-grid bg-bp px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-txt-soft" x-text="tenant.slug"></span>
+                      <span class="rounded border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide"
+                        :class="tenant.is_active ? 'border-green-border bg-green-soft text-green-text' : 'border-red-border bg-red-soft text-red-text'"
+                        x-text="tenant.is_active ? 'activo' : 'inactivo'"></span>
+                      <span x-show="tenant.id === Number(selectedTenantId)"
+                        class="rounded border border-cyan-border bg-cyan-soft px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-text">seleccionado</span>
+                    </div>
+                    <p class="mt-1 text-xs text-txt-dim">ID: <span x-text="tenant.id"></span></p>
 
-    <section x-show="selectedTenantId && activeTab === 'jobs'" class="space-y-3">
-      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <!-- Inline edit -->
+                    <div x-show="accountEditing === tenant.id" x-transition class="mt-4 space-y-3 rounded-xl border border-line bg-bp p-4">
+                      <label class="text-xs uppercase tracking-wide text-txt-dim">
+                        <span class="mb-1 block">Nombre</span>
+                        <input x-model="accountEditName" type="text"
+                          class="w-full rounded border border-grid bg-bp-elevated px-3 py-2 text-sm text-txt focus:border-blue focus:outline-none focus:ring-1 focus:ring-blue/20" />
+                      </label>
+                      <div class="flex items-center gap-2">
+                        <button type="button" @click="updateTenant(tenant.id)"
+                          class="rounded border border-blue-border bg-blue-soft px-4 py-2 text-xs font-semibold uppercase tracking-wide text-blue-text transition-all hover:bg-blue/15">
+                          Guardar
+                        </button>
+                        <button type="button" @click="accountEditing = null"
+                          class="rounded border border-grid px-3 py-2 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="flex flex-wrap gap-2">
+                    <button type="button" @click="changeTenant(tenant.id)" x-show="tenant.id !== Number(selectedTenantId)"
+                      class="rounded border border-cyan-border bg-cyan-soft px-3 py-2 text-xs font-semibold uppercase tracking-wide text-cyan-text transition-all hover:bg-cyan/10">
+                      Seleccionar
+                    </button>
+                    <button type="button" @click="accountEditing = tenant.id; accountEditName = tenant.name" x-show="accountEditing !== tenant.id"
+                      class="rounded border border-blue-border bg-blue-soft px-3 py-2 text-xs font-semibold uppercase tracking-wide text-blue-text transition-all hover:bg-blue/15">
+                      Editar
+                    </button>
+                    <button type="button" @click="toggleTenantActive(tenant.id, !tenant.is_active)"
+                      class="rounded border px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-all"
+                      :class="tenant.is_active ? 'border-amber-border bg-amber-soft text-amber-text hover:bg-amber/10' : 'border-green-border bg-green-soft text-green-text hover:bg-green/10'"
+                      x-text="tenant.is_active ? 'Desactivar' : 'Activar'"></button>
+                    <button type="button" @click="deleteTenant(tenant.id, tenant.name)"
+                      class="rounded border border-red-border bg-red-soft px-3 py-2 text-xs font-semibold uppercase tracking-wide text-red-text transition-all hover:bg-red/10">
+                      Eliminar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <div x-show="tenants.length === 0" class="rounded-xl border border-grid bg-bp-card px-6 py-16 text-center text-sm text-txt-muted">
+              No hay cuentas configuradas. Crea una para comenzar.
+            </div>
+          </div>
+
+          <!-- Service health -->
+          <div class="rounded-2xl border border-grid bg-bp-card p-5">
+            <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Sistema</p>
+            <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-txt">Estado del servicio</h2>
+            <div class="mt-4 flex items-center gap-3">
+              <span class="inline-flex items-center gap-1.5 rounded border px-3 py-1.5 text-xs font-medium"
+                :class="health && health.status === 'ok' ? 'border-green-border bg-green-soft text-green-text glow-green' : 'border-red-border bg-red-soft text-red-text'">
+                <span class="h-2 w-2 rounded-full" :class="health && health.status === 'ok' ? 'bg-green' : 'bg-red'"></span>
+                <span x-text="health && health.status === 'ok' ? 'ONLINE' : (health ? health.status : 'BOOTING')"></span>
+              </span>
+              <span class="text-[10px] uppercase tracking-wide text-txt-dim" x-text="uiBuild"></span>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div x-show="infoModal.open" x-cloak x-transition.opacity @keydown.escape.window="closeInfo()"
+    class="fixed inset-0 z-[60] flex items-center justify-center bg-black/25 px-4" @click.self="closeInfo()">
+    <div class="glass w-full max-w-lg rounded-2xl border border-line bg-bp-card p-5 shadow-2xl">
+      <div class="flex items-start justify-between gap-4">
         <div>
-          <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Ejecucion</p>
-          <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-white">Jobs provisionados</h2>
-          <p class="mt-2 text-xs text-txt-muted">Los jobs ahora cuelgan de una conexion concreta. Puedes tener multiples conexiones del mismo provider dentro de la misma cuenta sin mezclar ejecuciones.</p>
+          <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Info</p>
+          <h3 class="mt-2 text-lg font-semibold uppercase tracking-[0.14em] text-txt" x-text="infoModal.title"></h3>
         </div>
-        <button type="button" @click="triggerAll()" :disabled="Object.values(triggering).some(Boolean)"
-          class="rounded border border-grid bg-bp-card px-4 py-2 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft disabled:opacity-40">
-          Run all habilitados
+        <button type="button" class="info-trigger" title="Cerrar" @click="closeInfo()">
+          <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
         </button>
       </div>
-
-      <div class="grid gap-3 lg:grid-cols-2">
-        <template x-for="job in jobs" :key="job.id">
-          <div class="rounded-xl border border-grid bg-bp-card p-4 transition-all hover:border-line">
-            <div class="flex items-start justify-between gap-4">
-              <div class="min-w-0 flex-1">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="text-sm font-semibold text-white" x-text="job.job_label"></span>
-                  <span class="rounded border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
-                    :class="job.is_enabled ? 'border-green-border bg-green-soft text-green-text' : 'border-grid bg-bp text-txt-dim'"
-                    x-text="job.is_enabled ? 'enabled' : 'disabled'"></span>
-                </div>
-                <p class="mt-1 text-xs text-txt-muted"><span x-text="job.provider_label"></span> · <span x-text="job.connection_name"></span></p>
-                <p class="mt-2 text-xs leading-relaxed text-txt-soft" x-text="jobDescription(job.provider, job.job_type)"></p>
-                <div class="mt-3 flex flex-wrap gap-2 text-[10px] uppercase tracking-wide text-txt-dim">
-                  <span class="rounded border border-grid bg-bp px-2 py-1" x-text="job.job_type"></span>
-                  <span class="rounded border border-grid bg-bp px-2 py-1">conn #<span x-text="job.connection_id"></span></span>
-                </div>
-              </div>
-              <button type="button" @click="triggerJob(job.id)" :disabled="triggering[job.id] || !job.is_enabled"
-                class="rounded border border-blue-border bg-blue-soft px-4 py-2 text-xs font-semibold uppercase tracking-wide text-blue-text transition-all hover:bg-blue/15 disabled:opacity-40">
-                <span x-text="triggering[job.id] ? '...' : 'Run'"></span>
-              </button>
-            </div>
-          </div>
+      <div class="mt-4 space-y-3 text-sm leading-relaxed text-txt-soft">
+        <template x-for="(line, idx) in infoModal.lines" :key="idx">
+          <p x-text="line"></p>
         </template>
       </div>
-      <div x-show="jobs.length === 0" class="rounded-xl border border-grid bg-bp-card px-6 py-16 text-center text-sm text-txt-muted">
-        Sin jobs provisionados para esta cuenta.
-      </div>
-    </section>
+    </div>
+  </div>
 
-    <section x-show="selectedTenantId && activeTab === 'runs'" class="space-y-4">
-      <div>
-        <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Observabilidad</p>
-        <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-white">Corridas</h2>
-      </div>
-      <div class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
-        <table class="w-full text-sm">
-          <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
-            <tr>
-              <th class="px-4 py-3 text-left font-semibold">Run</th>
-              <th class="px-4 py-3 text-left font-semibold">Conexion</th>
-              <th class="px-4 py-3 text-left font-semibold">Job</th>
-              <th class="px-4 py-3 text-left font-semibold">Estado</th>
-              <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Raw / Norm</th>
-              <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Inicio</th>
-            </tr>
-          </thead>
-          <tbody>
-            <template x-for="(run, idx) in runs" :key="run.id">
-              <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
-                <td class="px-4 py-3 text-xs text-txt-dim">#<span x-text="run.id"></span></td>
-                <td class="px-4 py-3 text-xs text-txt-soft"><span x-text="run.connection_name"></span><span class="text-txt-dim"> · </span><span x-text="run.provider_label"></span></td>
-                <td class="px-4 py-3 text-xs text-txt-soft" x-text="run.job_type"></td>
-                <td class="px-4 py-3">
-                  <span class="rounded border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide"
-                    :class="runStatusClass(run.status)" x-text="run.status"></span>
-                </td>
-                <td class="hidden px-4 py-3 text-xs text-txt-dim md:table-cell">
-                  <span class="text-txt-soft" x-text="run.records_raw"></span>
-                  <span class="mx-1 text-grid-strong">/</span>
-                  <span class="text-txt-soft" x-text="run.records_normalized"></span>
-                </td>
-                <td class="hidden px-4 py-3 text-xs text-txt-dim md:table-cell" x-text="fmtDateTime(run.started_at)"></td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
-        <div x-show="runs.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin corridas recientes.</div>
-      </div>
-    </section>
-
-    <section x-show="selectedTenantId && activeTab === 'data'" class="space-y-4">
-      <div>
-        <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Modelo canonico</p>
-        <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-white">Data</h2>
-      </div>
-
-      <div class="flex w-fit gap-1 rounded-lg border border-grid bg-bp p-1">
-        <template x-for="dt in dataTabs" :key="dt.id">
-          <button @click="activeDataTab = dt.id; loadDataTab(dt.id)"
-            class="rounded px-3 py-1.5 text-xs font-medium uppercase tracking-wide transition-all"
-            :class="activeDataTab === dt.id ? 'border border-blue-border bg-blue-soft text-blue-bright glow' : 'text-txt-muted hover:text-txt-soft'">
-            <span x-text="dt.label"></span>
-            <span x-show="dataStats[dt.id] !== undefined" class="ml-1 text-txt-dim" x-text="'(' + dataStats[dt.id] + ')' "></span>
-          </button>
-        </template>
-      </div>
-
-      <div x-show="dataLoading" class="rounded-xl border border-grid bg-bp-card px-6 py-14 text-center text-sm text-txt-muted">Cargando...</div>
-
-      <div x-show="activeDataTab === 'products' && !dataLoading" class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
-        <div x-show="dataProducts.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin productos.</div>
-        <table x-show="dataProducts.length > 0" class="w-full text-sm">
-          <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
-            <tr>
-              <th class="px-4 py-3 text-left font-semibold">ID ext.</th>
-              <th class="px-4 py-3 text-left font-semibold">SKU</th>
-              <th class="px-4 py-3 text-left font-semibold">Nombre</th>
-              <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Categoria</th>
-              <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Unidad</th>
-            </tr>
-          </thead>
-          <tbody>
-            <template x-for="(p, idx) in dataProducts" :key="p.id">
-              <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
-                <td class="px-4 py-3 text-xs text-txt-dim" x-text="p.external_id"></td>
-                <td class="px-4 py-3 text-xs text-txt-soft" x-text="p.sku ?? '—'"></td>
-                <td class="px-4 py-3 text-sm font-medium text-white" x-text="p.name"></td>
-                <td class="hidden px-4 py-3 text-xs text-txt-muted md:table-cell" x-text="p.category ?? '—'"></td>
-                <td class="hidden px-4 py-3 text-xs text-txt-muted md:table-cell" x-text="p.unit ?? '—'"></td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
-      </div>
-
-      <div x-show="activeDataTab === 'branches' && !dataLoading" class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
-        <div x-show="dataBranches.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin sucursales.</div>
-        <table x-show="dataBranches.length > 0" class="w-full text-sm">
-          <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
-            <tr>
-              <th class="px-4 py-3 text-left font-semibold">ID ext.</th>
-              <th class="px-4 py-3 text-left font-semibold">Nombre</th>
-              <th class="px-4 py-3 text-left font-semibold">Codigo</th>
-            </tr>
-          </thead>
-          <tbody>
-            <template x-for="(b, idx) in dataBranches" :key="b.id">
-              <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
-                <td class="px-4 py-3 text-xs text-txt-dim" x-text="b.external_id"></td>
-                <td class="px-4 py-3 text-sm font-medium text-white" x-text="b.name"></td>
-                <td class="px-4 py-3 text-xs text-txt-muted" x-text="b.code ?? '—'"></td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
-      </div>
-
-      <div x-show="activeDataTab === 'stock' && !dataLoading" class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
-        <div x-show="dataStock.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin stock.</div>
-        <table x-show="dataStock.length > 0" class="w-full text-sm">
-          <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
-            <tr>
-              <th class="px-4 py-3 text-left font-semibold">Producto</th>
-              <th class="px-4 py-3 text-left font-semibold">Sucursal</th>
-              <th class="px-4 py-3 text-left font-semibold">Cantidad</th>
-              <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Capturado</th>
-            </tr>
-          </thead>
-          <tbody>
-            <template x-for="(s, idx) in dataStock" :key="s.id">
-              <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
-                <td class="px-4 py-3 text-xs text-txt-soft" x-text="s.product_external_id"></td>
-                <td class="px-4 py-3 text-xs text-txt-soft" x-text="s.branch_external_id"></td>
-                <td class="px-4 py-3 text-sm font-semibold text-white" x-text="s.quantity"></td>
-                <td class="hidden px-4 py-3 text-xs text-txt-dim md:table-cell" x-text="fmtDateTime(s.captured_at)"></td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
-      </div>
-
-      <div x-show="activeDataTab === 'sales' && !dataLoading" class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
-        <div x-show="dataSales.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin ventas.</div>
-        <table x-show="dataSales.length > 0" class="w-full text-sm">
-          <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
-            <tr>
-              <th class="px-4 py-3 text-left font-semibold">ID ext.</th>
-              <th class="px-4 py-3 text-left font-semibold">Sucursal</th>
-              <th class="px-4 py-3 text-left font-semibold">Cliente</th>
-              <th class="px-4 py-3 text-left font-semibold">Total</th>
-              <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Emitido</th>
-            </tr>
-          </thead>
-          <tbody>
-            <template x-for="(sale, idx) in dataSales" :key="sale.id">
-              <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
-                <td class="px-4 py-3 text-xs text-txt-dim" x-text="sale.external_id"></td>
-                <td class="px-4 py-3 text-xs text-txt-soft" x-text="sale.branch_external_id ?? '—'"></td>
-                <td class="px-4 py-3 text-xs text-txt-soft" x-text="sale.customer_external_id ?? '—'"></td>
-                <td class="px-4 py-3 text-sm font-semibold text-white" x-text="'$' + Number(sale.total_amount).toLocaleString('es-CL')"></td>
-                <td class="hidden px-4 py-3 text-xs text-txt-dim md:table-cell" x-text="fmtDateTime(sale.issued_at)"></td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section x-show="selectedTenantId && activeTab === 'errors'" class="space-y-3">
-      <div>
-        <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Incidentes</p>
-        <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-white">Errores</h2>
-      </div>
-      <template x-for="err in errors" :key="err.id">
-        <div class="rounded-xl border border-red-border bg-bp-card p-4">
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0 flex-1">
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="rounded border border-red-border bg-red-soft px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-red-text" x-text="err.severity"></span>
-                <span class="rounded border border-grid bg-bp px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-txt-soft" x-text="err.object_name"></span>
-                <span x-show="err.job_run_id" class="text-[10px] uppercase tracking-wide text-txt-dim">run #<span x-text="err.job_run_id"></span></span>
-              </div>
-              <p class="mt-3 text-sm leading-relaxed text-txt" x-text="err.message"></p>
-              <p class="mt-2 text-xs text-txt-dim" x-text="fmtDateTime(err.created_at)"></p>
-            </div>
-            <button type="button" x-show="err.payload" @click="err._open = !err._open"
-              class="rounded border border-grid px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
-              <span x-text="err._open ? 'Ocultar' : 'Payload'"></span>
-            </button>
-          </div>
-          <pre x-show="err._open" x-transition class="mt-3 overflow-x-auto rounded border border-grid bg-bp p-3 text-xs text-txt-soft" x-text="JSON.stringify(err.payload, null, 2)"></pre>
-        </div>
-      </template>
-      <div x-show="errors.length === 0" class="rounded-xl border border-grid bg-bp-card px-6 py-16 text-center text-sm text-txt-muted">Sin errores registrados.</div>
-    </section>
-
-    <section x-show="selectedTenantId && activeTab === 'audit'" class="space-y-3">
-      <div>
-        <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Governance</p>
-        <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-white">Audit trail</h2>
-      </div>
-      <template x-for="row in auditLogs" :key="row.id">
-        <div class="rounded-xl border border-grid bg-bp-card p-4">
-          <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div class="min-w-0 flex-1">
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="rounded border border-cyan-border bg-cyan-soft px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-text" x-text="row.action"></span>
-                <span class="rounded border border-grid bg-bp px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-txt-soft" x-text="row.target_type"></span>
-                <span class="text-[10px] uppercase tracking-wide text-txt-dim" x-text="row.actor"></span>
-              </div>
-              <p class="mt-2 text-sm text-white" x-text="row.target_label ?? row.target_id ?? 'sin etiqueta'"></p>
-              <p class="mt-1 text-xs text-txt-dim" x-text="fmtDateTime(row.created_at)"></p>
-            </div>
-            <pre class="w-full overflow-x-auto rounded border border-grid bg-bp p-3 text-xs text-txt-soft md:w-[420px]" x-text="JSON.stringify(row.payload ?? {}, null, 2)"></pre>
-          </div>
-        </div>
-      </template>
-      <div x-show="auditLogs.length === 0" class="rounded-xl border border-grid bg-bp-card px-6 py-16 text-center text-sm text-txt-muted">Sin eventos auditados.</div>
-    </section>
-  </main>
-
+  <!-- Toast notifications -->
   <div class="pointer-events-none fixed bottom-5 right-5 z-50 flex flex-col gap-2">
     <template x-for="toast in toasts" :key="toast.id">
       <div class="pointer-events-auto flex items-center gap-3 rounded-lg border bg-bp-card px-4 py-3 text-sm"
@@ -821,6 +1123,7 @@
         auditLogs: [],
         selectedTenantId: null,
         activeTab: 'overview',
+        sidebarOpen: localStorage.getItem('sidebar') !== 'false',
         autoRefresh: true,
         loading: false,
         creatingConnection: false,
@@ -832,6 +1135,9 @@
         connEnv: {},
         connUrl: {},
         connTok: {},
+        editorDirty: {},
+        editorStatus: {},
+        editorStatusType: {},
         createOpen: false,
         createConn: {
           provider: 'bsale',
@@ -842,8 +1148,20 @@
           api_key: '',
           is_primary: false,
         },
+        infoModal: {
+          open: false,
+          title: '',
+          lines: [],
+        },
         toasts: [],
         _interval: null,
+
+        // ── Tenant CRUD state ──
+        accountCreateOpen: false,
+        newTenant: { name: '', slug: '' },
+        accountCreating: false,
+        accountEditing: null,
+        accountEditName: '',
 
         activeDataTab: 'products',
         dataLoading: false,
@@ -859,24 +1177,70 @@
           { id: 'sales', label: 'Ventas' },
         ],
 
+        // ── Navigation & routing ──
+        _validTabs: ['overview', 'connectors', 'jobs', 'runs', 'data', 'errors', 'audit', 'account'],
+
+        _navIcons: {
+          overview: '<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>',
+          connectors: '<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>',
+          jobs: '<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>',
+          runs: '<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
+          data: '<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"/></svg>',
+          errors: '<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>',
+          audit: '<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>',
+          account: '<svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>',
+        },
+
+        _pageTitles: {
+          overview: 'Mapa de integraciones',
+          connectors: 'Gestionar conexiones',
+          jobs: 'Jobs provisionados',
+          runs: 'Corridas de ejecucion',
+          data: 'Modelo canonico',
+          errors: 'Registro de errores',
+          audit: 'Audit trail',
+          account: 'Configuracion de cuenta',
+        },
+
         get currentTenant() {
           return this.tenants.find(tenant => tenant.id === Number(this.selectedTenantId)) ?? null
         },
 
-        get tabs() {
+        hasOpenEditor() {
+          return Object.values(this.openConns).some(Boolean)
+        },
+
+        get navItems() {
           const running = this.runs.filter(run => run.status === 'running').length
           return [
-            { id: 'overview', label: 'Overview', badge: this.overview?.totals?.connections_total ?? null },
-            { id: 'connectors', label: 'Conectores', badge: this.connectors.length || null },
-            { id: 'jobs', label: 'Jobs', badge: this.jobs.length || null },
-            { id: 'runs', label: 'Corridas', badge: running > 0 ? `${running} live` : (this.runs.length || null), badgeClass: running > 0 ? 'border-cyan-border bg-cyan-soft text-cyan-text' : 'border-grid bg-bp text-txt-muted' },
-            { id: 'data', label: 'Data', badge: null },
-            { id: 'errors', label: 'Errores', badge: this.errors.length || null, badgeClass: 'border-red-border bg-red-soft text-red-text' },
-            { id: 'audit', label: 'Audit', badge: this.auditLogs.length || null },
+            { id: 'overview', label: 'Overview', badge: this.overview?.totals?.connections_total ?? null, icon: this._navIcons.overview },
+            { id: 'connectors', label: 'Conectores', badge: this.connectors.length || null, icon: this._navIcons.connectors },
+            { id: 'jobs', label: 'Jobs', badge: this.jobs.length || null, icon: this._navIcons.jobs },
+            { id: 'runs', label: 'Corridas', badge: running > 0 ? `${running} live` : (this.runs.length || null), badgeClass: running > 0 ? 'border-cyan-border bg-cyan-soft text-cyan-text' : 'border-grid bg-bp text-txt-muted', icon: this._navIcons.runs },
+            { id: 'data', label: 'Data', badge: null, icon: this._navIcons.data },
+            { id: 'errors', label: 'Errores', badge: this.errors.length || null, badgeClass: 'border-red-border bg-red-soft text-red-text', icon: this._navIcons.errors },
+            { id: 'audit', label: 'Audit', badge: this.auditLogs.length || null, icon: this._navIcons.audit },
           ]
         },
 
+        navigate(tab) {
+          if (this._validTabs.includes(tab)) {
+            this.activeTab = tab
+            history.pushState({ tab }, '', `/ui/${tab}`)
+          }
+        },
+
+        _initRouteFromUrl() {
+          const path = window.location.pathname.replace(/^\/ui\/?/, '').split('/')[0] || 'overview'
+          this.activeTab = this._validTabs.includes(path) ? path : 'overview'
+        },
+
         async init() {
+          this._initRouteFromUrl()
+          window.addEventListener('popstate', (e) => {
+            const tab = e.state?.tab ?? (window.location.pathname.replace(/^\/ui\/?/, '').split('/')[0] || 'overview')
+            this.activeTab = this._validTabs.includes(tab) ? tab : 'overview'
+          })
           await this.fetchProviders()
           this.syncCreateDefaults(true)
           await this.fetchTenants()
@@ -885,6 +1249,17 @@
         },
 
         toggleAutoRefresh() { this.autoRefresh = !this.autoRefresh },
+
+        openInfo(title, body) {
+          const lines = (Array.isArray(body) ? body : [body]).filter(Boolean)
+          this.infoModal = { open: true, title, lines }
+          document.documentElement.classList.add('overflow-hidden')
+        },
+
+        closeInfo() {
+          this.infoModal = { open: false, title: '', lines: [] }
+          document.documentElement.classList.remove('overflow-hidden')
+        },
 
         tenantScopedUrl(url) {
           if (!this.selectedTenantId) return url
@@ -942,6 +1317,9 @@
           this.connEnv = {}
           this.connUrl = {}
           this.connTok = {}
+          this.editorDirty = {}
+          this.editorStatus = {}
+          this.editorStatusType = {}
           this.dataStats = {}
           this.dataProducts = []
           this.dataBranches = []
@@ -954,6 +1332,93 @@
           this.clearTenantScopedState()
           await this.refresh()
           if (this.activeTab === 'data') await this.loadDataTab(this.activeDataTab)
+        },
+
+        // ── Tenant CRUD methods ──
+        async createTenant() {
+          if (!this.newTenant.slug || !this.newTenant.name) return
+          this.accountCreating = true
+          try {
+            const res = await fetch('/admin/tenants', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(this.newTenant),
+            })
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}))
+              throw new Error(err.detail ?? res.statusText)
+            }
+            this.newTenant = { name: '', slug: '' }
+            this.accountCreateOpen = false
+            this.notify('Cuenta creada', 'success')
+            await this.fetchTenants()
+          } catch (e) {
+            console.error('[createTenant]', e)
+            this.notify(e.message || 'Error al crear cuenta', 'error')
+          } finally {
+            this.accountCreating = false
+          }
+        },
+
+        async updateTenant(tenantId) {
+          if (!this.accountEditName.trim()) return
+          try {
+            const res = await fetch(`/admin/tenants/${tenantId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: this.accountEditName.trim() }),
+            })
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}))
+              throw new Error(err.detail ?? res.statusText)
+            }
+            this.accountEditing = null
+            this.notify('Cuenta actualizada', 'success')
+            await this.fetchTenants()
+          } catch (e) {
+            console.error('[updateTenant]', e)
+            this.notify(e.message || 'Error al actualizar', 'error')
+          }
+        },
+
+        async toggleTenantActive(tenantId, active) {
+          try {
+            const res = await fetch(`/admin/tenants/${tenantId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ is_active: active }),
+            })
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}))
+              throw new Error(err.detail ?? res.statusText)
+            }
+            this.notify(active ? 'Cuenta activada' : 'Cuenta desactivada', 'success')
+            await this.fetchTenants()
+          } catch (e) {
+            console.error('[toggleTenantActive]', e)
+            this.notify(e.message || 'Error al cambiar estado', 'error')
+          }
+        },
+
+        async deleteTenant(tenantId, name) {
+          if (!confirm(`¿Eliminar la cuenta "${name}"?\nSe borrarán todas las conexiones, jobs, datos y configuración asociada.\nEsta acción no se puede deshacer.`)) return
+          try {
+            const res = await fetch(`/admin/tenants/${tenantId}?force=true`, { method: 'DELETE' })
+            if (!res.ok) {
+              const err = await res.json().catch(() => ({}))
+              throw new Error(err.detail ?? res.statusText)
+            }
+            this.notify('Cuenta eliminada', 'success')
+            if (Number(this.selectedTenantId) === tenantId) {
+              this.selectedTenantId = null
+              this.clearTenantScopedState()
+            }
+            await this.fetchTenants()
+            await this.refresh()
+          } catch (e) {
+            console.error('[deleteTenant]', e)
+            this.notify(e.message || 'Error al eliminar', 'error')
+          }
         },
 
         async refresh() {
@@ -980,6 +1445,10 @@
 
         async _softRefresh() {
           if (!this.selectedTenantId) return
+          if (this.createOpen || this.hasOpenEditor()) {
+            await this.fetchHealth()
+            return
+          }
           await Promise.all([
             this.fetchHealth(),
             this.fetchOverview(),
@@ -1003,7 +1472,7 @@
         },
 
         async fetchHealth() {
-          try { this.health = await this._fetchJson('/admin/health') } catch {}
+          try { this.health = await this._fetchJson('/admin/health') } catch (e) { console.error('[fetchHealth]', e) }
         },
 
         async fetchTenants() {
@@ -1013,7 +1482,7 @@
             if (!this.selectedTenantId || !tenants.some(tenant => tenant.id === Number(this.selectedTenantId))) {
               this.selectedTenantId = tenants.length > 0 ? tenants[0].id : null
             }
-          } catch {}
+          } catch (e) { console.error('[fetchTenants]', e) }
         },
 
         async fetchProviders() {
@@ -1021,39 +1490,39 @@
             this.providers = await this._fetchArray('/admin/providers')
             if (!this.createConn.provider && this.providers.length > 0) this.createConn.provider = this.providers[0].key
             this.syncCreateDefaults(false)
-          } catch {}
+          } catch (e) { console.error('[fetchProviders]', e) }
         },
 
         async fetchOverview() {
           if (!this.selectedTenantId) return
-          try { this.overview = await this._fetchJson(this.tenantScopedUrl('/admin/overview')) } catch {}
+          try { this.overview = await this._fetchJson(this.tenantScopedUrl('/admin/overview')) } catch (e) { console.error('[fetchOverview]', e) }
         },
 
         async fetchConnectors() {
           if (!this.selectedTenantId) return
-          try { this.connectors = await this._fetchArray(this.tenantScopedUrl('/admin/connectors')) } catch {}
+          try { this.connectors = await this._fetchArray(this.tenantScopedUrl('/admin/connectors')) } catch (e) { console.error('[fetchConnectors]', e) }
         },
 
         async fetchJobs() {
           if (!this.selectedTenantId) return
-          try { this.jobs = await this._fetchArray(this.tenantScopedUrl('/admin/jobs')) } catch {}
+          try { this.jobs = await this._fetchArray(this.tenantScopedUrl('/admin/jobs')) } catch (e) { console.error('[fetchJobs]', e) }
         },
 
         async fetchRuns() {
           if (!this.selectedTenantId) return
-          try { this.runs = await this._fetchArray(this.tenantScopedUrl('/admin/runs?limit=50')) } catch {}
+          try { this.runs = await this._fetchArray(this.tenantScopedUrl('/admin/runs?limit=50')) } catch (e) { console.error('[fetchRuns]', e) }
         },
 
         async fetchErrors() {
           if (!this.selectedTenantId) return
           try {
             this.errors = (await this._fetchArray(this.tenantScopedUrl('/admin/errors?limit=30'))).map(err => ({ ...err, _open: false }))
-          } catch {}
+          } catch (e) { console.error('[fetchErrors]', e) }
         },
 
         async fetchAudit() {
           if (!this.selectedTenantId) return
-          try { this.auditLogs = await this._fetchArray(this.tenantScopedUrl('/admin/audit?limit=30')) } catch {}
+          try { this.auditLogs = await this._fetchArray(this.tenantScopedUrl('/admin/audit?limit=30')) } catch (e) { console.error('[fetchAudit]', e) }
         },
 
         async loadDataTab(tab) {
@@ -1075,12 +1544,30 @@
         },
 
         prepareConnectionForm(conn) {
-          this.connName = { ...this.connName, [conn.id]: this.connName[conn.id] ?? conn.name }
-          this.connMode = { ...this.connMode, [conn.id]: this.connMode[conn.id] ?? conn.mode }
-          this.connEnv = { ...this.connEnv, [conn.id]: this.connEnv[conn.id] ?? conn.environment }
-          this.connUrl = { ...this.connUrl, [conn.id]: this.connUrl[conn.id] ?? conn.base_url }
-          this.connTok = { ...this.connTok, [conn.id]: this.connTok[conn.id] ?? '' }
-          this.syncConnectionDefaults(conn.id, conn.provider, false)
+          this.connName = { ...this.connName, [conn.id]: conn.name }
+          this.connMode = { ...this.connMode, [conn.id]: conn.mode }
+          this.connEnv = { ...this.connEnv, [conn.id]: conn.environment }
+          this.connUrl = { ...this.connUrl, [conn.id]: conn.base_url }
+          this.connTok = { ...this.connTok, [conn.id]: '' }
+          this.editorDirty = { ...this.editorDirty, [conn.id]: false }
+          this.editorStatus = { ...this.editorStatus, [conn.id]: '' }
+          this.editorStatusType = { ...this.editorStatusType, [conn.id]: 'success' }
+        },
+
+        resetConnectionDraft(connId) {
+          const conn = this.connectors.find(item => item.id === connId)
+          if (!conn) return
+          this.prepareConnectionForm(conn)
+        },
+
+        markConnectionDirty(connId) {
+          this.editorDirty = { ...this.editorDirty, [connId]: true }
+          this.editorStatus = { ...this.editorStatus, [connId]: '' }
+        },
+
+        setEditorStatus(connId, type, message) {
+          this.editorStatus = { ...this.editorStatus, [connId]: message ?? '' }
+          this.editorStatusType = { ...this.editorStatusType, [connId]: type }
         },
 
         syncConnectionDefaults(connId, providerKey, forceUrl = false) {
@@ -1097,7 +1584,51 @@
           if (!conn) return
           this.prepareConnectionForm(conn)
           this.openConns = { ...this.openConns, [conn.id]: true }
-          this.activeTab = 'connectors'
+          this.navigate('connectors')
+        },
+
+        connectionDraft(connId) {
+          const conn = this.connectors.find(item => item.id === connId)
+          if (!conn) return null
+          const mode = this.connMode[connId] ?? conn.mode
+          const environment = this.connEnv[connId] ?? (mode === 'mock' ? 'mock' : conn.environment)
+          const baseUrl = (this.connUrl[connId] ?? conn.base_url ?? '').trim()
+          const token = (this.connTok[connId] ?? '').trim()
+          return {
+            conn,
+            body: {
+              name: (this.connName[connId] ?? conn.name ?? '').trim() || conn.name,
+              mode,
+              environment,
+              base_url: baseUrl,
+            },
+            token,
+          }
+        },
+
+        validateConnectionDraft(connId) {
+          const draft = this.connectionDraft(connId)
+          if (!draft) return null
+          const { conn, body, token } = draft
+          if (body.mode === 'real') {
+            const switchingFromMock = conn.mode !== 'real'
+            if (!body.base_url) {
+              const message = 'Falta Base URL para guardar la conexion real.'
+              this.setEditorStatus(connId, 'error', message)
+              this.notify('error', message)
+              return null
+            }
+            if (!token && (switchingFromMock || !conn.has_secret)) {
+              const message = switchingFromMock
+                ? 'Al pasar de mock a real debes cargar un API Token real.'
+                : 'Falta API Token. Carga un token o conserva uno ya guardado antes de pasar a real.'
+              this.setEditorStatus(connId, 'error', message)
+              this.notify('error', message)
+              return null
+            }
+          }
+          if (token) body.api_key = token
+          return body
         },
 
         async createConnection() {
@@ -1148,6 +1679,7 @@
             this.notify(payload.connected === false || payload.last_check_ok === false ? 'error' : 'success', payload.message ?? 'Operacion completada')
             return payload
           } catch (error) {
+            this.setEditorStatus(connId, 'error', error.message)
             this.notify('error', error.message)
             return null
           } finally {
@@ -1156,26 +1688,43 @@
         },
 
         async saveConnectionConfig(connId) {
-          const conn = this.connectors.find(item => item.id === connId)
-          if (!conn) return null
-          const body = {
-            name: (this.connName[connId] ?? conn.name ?? '').trim() || conn.name,
-            mode: this.connMode[connId] ?? conn.mode,
-            environment: this.connEnv[connId] ?? conn.environment,
-            base_url: (this.connUrl[connId] ?? '').trim(),
+          const body = this.validateConnectionDraft(connId)
+          if (!body) return null
+          const payload = await this.updateConnection(connId, body)
+          if (payload) {
+            this.prepareConnectionForm(payload)
+            this.setEditorStatus(connId, 'success', payload.message ?? 'Configuracion guardada')
           }
-          const token = (this.connTok[connId] ?? '').trim()
-          if (token) body.secret_ref = token
-          return await this.updateConnection(connId, body)
+          return payload
         },
 
         async saveAndCheckConnection(connId) {
           const saved = await this.saveConnectionConfig(connId)
           if (!saved) return null
           const checked = await this.updateConnection(connId, null, 'POST', '/check')
+          if (checked) {
+            this.prepareConnectionForm(checked)
+            this.setEditorStatus(connId, checked.connected ? 'success' : 'error', checked.message ?? 'Check ejecutado')
+          }
           if (checked?.connected) {
             this.openConns = { ...this.openConns, [connId]: false }
           }
+          return checked
+        },
+
+        async runConnectionCheck(conn) {
+          if (!conn) return null
+          if (conn.mode === 'real' && (!conn.has_secret || !conn.base_url || conn.status === 'config_incomplete')) {
+            this.openConnectionEditor(conn.id)
+            const message = !conn.has_secret
+              ? 'Antes de probar, guarda un API Token para esta conexion real.'
+              : 'Antes de probar, guarda la configuracion real pendiente.'
+            this.setEditorStatus(conn.id, 'error', message)
+            this.notify('error', message)
+            return null
+          }
+          const checked = await this.updateConnection(conn.id, null, 'POST', '/check')
+          if (checked) this.setEditorStatus(conn.id, checked.connected ? 'success' : 'error', checked.message ?? 'Check ejecutado')
           return checked
         },
 
@@ -1223,7 +1772,7 @@
             if (!response.ok) throw new Error((await response.json()).detail ?? response.statusText)
             const payload = await response.json()
             await Promise.all([this.fetchRuns(), this.fetchAudit(), this.fetchOverview(), this.fetchConnectors()])
-            this.activeTab = 'runs'
+            this.navigate('runs')
             this.notify('success', payload.message ?? 'Sync encolado')
           } catch (error) {
             this.notify('error', error.message)
@@ -1245,7 +1794,7 @@
             if (!response.ok) throw new Error((await response.json()).detail ?? response.statusText)
             const run = await response.json()
             await Promise.all([this.fetchRuns(), this.fetchAudit(), this.fetchOverview()])
-            this.activeTab = 'runs'
+            this.navigate('runs')
             this.notify('success', `Run #${run.id} encolado`)
           } catch (error) {
             this.notify('error', error.message)
@@ -1261,13 +1810,24 @@
         },
 
         openConnectionById(connId) {
-          this.activeTab = 'connectors'
+          this.navigate('connectors')
           this.openConnectionEditor(connId)
         },
 
         jobDescription(providerKey, jobType) {
           const provider = this.providerMeta(providerKey)
           return provider?.jobs?.find(job => job.job_type === jobType)?.description ?? jobType
+        },
+
+        onboardingInfoLines(onboarding) {
+          const lines = [
+            `Progreso operativo: ${onboarding.progress}%.`,
+            onboarding.ready ? 'Estado: ready.' : `Siguiente accion: ${onboarding.next_action ?? 'pendiente'}.`,
+          ]
+          for (const step of onboarding.steps ?? []) {
+            lines.push(`${step.label}: ${step.done ? 'ok' : 'pendiente'}. ${step.detail}`)
+          }
+          return lines
         },
 
         connectionStatusLabel(status) {
