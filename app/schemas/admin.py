@@ -145,6 +145,7 @@ class JobRunResponse(BaseModel):
     provider: str
     provider_label: str
     job_type: str
+    job_label: str
     status: str
     correlation_id: str
     started_at: datetime | None
@@ -162,6 +163,26 @@ class ErrorResponse(BaseModel):
     severity: str
     payload: dict[str, Any] | None = Field(default=None)
     created_at: datetime
+
+
+class RunRawObjectResponse(BaseModel):
+    id: int
+    endpoint: str
+    checksum: str
+    fetched_at: datetime
+    payload: dict[str, Any]
+
+
+class RunStepResponse(BaseModel):
+    endpoint: str
+    record_count: int
+    raw_objects: list[RunRawObjectResponse]
+
+
+class RunDetailResponse(BaseModel):
+    run: JobRunResponse
+    errors: list[ErrorResponse]
+    steps: list[RunStepResponse]
 
 
 class MappingResponse(BaseModel):

@@ -11,6 +11,9 @@ def test_provider_registry_exposes_bsale() -> None:
     assert provider.display_name == "Bsale"
     assert provider.default_base_url(mode=ConnectorMode.MOCK).endswith("/v1")
     assert provider.supports_job("sync_product_catalog")
+    assert provider.supports_job("sync_locations")
+    assert provider.supports_job("sync_stock")
+    assert provider.supports_job("sync_sales_orders")
     assert provider.supports_job("sync_customers")
     assert provider.supports_job("sync_document_types")
 
@@ -26,5 +29,6 @@ def test_admin_providers_endpoint_exposes_provider_defaults() -> None:
     assert bsale["default_base_urls"]["mock"].endswith("/v1")
     assert bsale["default_base_urls"]["real"].startswith("https://")
     assert any(job["job_type"] == "sync_product_catalog" for job in bsale["jobs"])
-    assert any(job["job_type"] == "sync_customers" for job in bsale["jobs"])
-    assert any(job["job_type"] == "sync_document_types" for job in bsale["jobs"])
+    assert any(job["job_type"] == "sync_locations" for job in bsale["jobs"])
+    assert any(job["job_type"] == "sync_stock" for job in bsale["jobs"])
+    assert any(job["job_type"] == "sync_sales_orders" for job in bsale["jobs"])

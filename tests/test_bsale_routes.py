@@ -19,7 +19,7 @@ def test_can_switch_to_real_mode_and_attempt_connection() -> None:
         "/connectors/bsale",
         json={
             "mode": "real",
-            "base_url": "https://api.bsale.cl/v1",
+            "base_url": "https://api.bsale.io/v1",
             "api_key": "demo-token-1234",
             "check_connection": False,
         },
@@ -28,5 +28,5 @@ def test_can_switch_to_real_mode_and_attempt_connection() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["mode"] == "real"
-    assert payload["base_url"] == "https://api.bsale.cl/v1"
+    assert payload["base_url"] == "https://api.bsale.io/v1"
     assert payload["api_key"].endswith("1234")

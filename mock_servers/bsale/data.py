@@ -148,12 +148,6 @@ PRODUCT_TAXES = {
     ],
 }
 
-COMPANY = {
-    "href": "https://api.bsale.io/v1/company.json",
-    "id": 77,
-    "name": "Demo Retail",
-}
-
 OFFICES = [
     {
         "href": "https://api.bsale.io/v1/offices/1.json",
@@ -266,9 +260,58 @@ DOCUMENT_TYPES = [
 ]
 
 STOCKS = [
-    {"id": 5001, "productid": 101, "officeid": 1, "quantity": 80},
-    {"id": 5002, "productid": 102, "officeid": 1, "quantity": 120},
-    {"id": 5003, "productid": 103, "officeid": 2, "quantity": 50},
+    {"id": 5001, "productid": 101, "variantid": 201, "officeid": 1, "quantity": 80},
+    {"id": 5002, "productid": 102, "variantid": 202, "officeid": 1, "quantity": 120},
+    {"id": 5003, "productid": 103, "variantid": 203, "officeid": 2, "quantity": 50},
+]
+
+STOCK_RECEPTIONS = [
+    {
+        "href": "https://api.bsale.io/v1/stocks/receptions/7001.json",
+        "id": 7001,
+        "receptionDate": 1736852400,
+        "office": {"href": "https://api.bsale.io/v1/offices/1.json", "id": "1"},
+        "details": {
+            "count": 2,
+            "items": [
+                {
+                    "id": 71001,
+                    "lineNumber": 0,
+                    "quantity": 40,
+                    "cost": 5200,
+                    "variant": {"href": "https://api.bsale.io/v1/variants/201.json", "id": "201"},
+                },
+                {
+                    "id": 71002,
+                    "lineNumber": 1,
+                    "quantity": 30,
+                    "cost": 1200,
+                    "variant": {"href": "https://api.bsale.io/v1/variants/202.json", "id": "202"},
+                },
+            ],
+        },
+    }
+]
+
+STOCK_CONSUMPTIONS = [
+    {
+        "href": "https://api.bsale.io/v1/stocks/consumptions/8001.json",
+        "id": 8001,
+        "consumptionDate": 1736940000,
+        "office": {"href": "https://api.bsale.io/v1/offices/2.json", "id": "2"},
+        "details": {
+            "count": 1,
+            "items": [
+                {
+                    "id": 81001,
+                    "lineNumber": 0,
+                    "quantity": 3,
+                    "cost": 1500,
+                    "variant": {"href": "https://api.bsale.io/v1/variants/203.json", "id": "203"},
+                }
+            ],
+        },
+    }
 ]
 
 CLIENTS = [

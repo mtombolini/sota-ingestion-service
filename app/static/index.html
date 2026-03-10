@@ -251,7 +251,7 @@
                 </div>
                 <div class="flex items-center gap-2">
                   <button type="button" class="info-trigger" title="Ver ayuda de esta seccion"
-                    @click="openInfo('Mapa de integraciones', ['Cada tarjeta representa una conexion concreta del tenant con un provider.', 'El estado mezcla configuracion, ultimo check, jobs habilitados, corridas y errores recientes.'])">
+                    @click="openInfo('Mapa de integraciones', ['Cada tarjeta representa una conexion concreta del tenant con un provider.', 'El estado mezcla configuracion, ultimo check, jobs habilitados, ejecuciones y errores recientes.'])">
                     <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                       <path stroke-linecap="round" stroke-linejoin="round" d="M12 8h.01M11 12h1v4h1m-1 5a9 9 0 110-18 9 9 0 010 18z"/>
                     </svg>
@@ -731,7 +731,7 @@
         <section x-show="selectedTenantId && activeTab === 'runs'" class="space-y-4">
           <div>
             <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Observabilidad</p>
-            <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-txt">Corridas</h2>
+            <h2 class="mt-2 text-lg font-semibold uppercase tracking-[0.16em] text-txt">Ejecuciones</h2>
           </div>
           <div class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
             <table class="w-full text-sm">
@@ -741,8 +741,10 @@
                   <th class="px-4 py-3 text-left font-semibold">Conexion</th>
                   <th class="px-4 py-3 text-left font-semibold">Job</th>
                   <th class="px-4 py-3 text-left font-semibold">Estado</th>
-                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Raw / Norm</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">API / Canonicos</th>
                   <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Inicio</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden lg:table-cell">Duracion</th>
+                  <th class="px-4 py-3 text-right font-semibold">Detalle</th>
                 </tr>
               </thead>
               <tbody>
@@ -750,22 +752,33 @@
                   <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
                     <td class="px-4 py-3 text-xs text-txt-dim">#<span x-text="run.id"></span></td>
                     <td class="px-4 py-3 text-xs text-txt-soft"><span x-text="run.connection_name"></span><span class="text-txt-dim"> · </span><span x-text="run.provider_label"></span></td>
-                    <td class="px-4 py-3 text-xs text-txt-soft" x-text="run.job_type"></td>
+                    <td class="px-4 py-3">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span class="text-xs text-txt-soft" x-text="run.job_label ?? run.job_type"></span>
+                        <span class="rounded border border-grid bg-bp px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-txt-dim" x-text="run.job_type"></span>
+                      </div>
+                    </td>
                     <td class="px-4 py-3">
                       <span class="rounded border px-2.5 py-1 text-xs font-semibold uppercase tracking-wide"
                         :class="runStatusClass(run.status)" x-text="run.status"></span>
                     </td>
                     <td class="hidden px-4 py-3 text-xs text-txt-dim md:table-cell">
-                      <span class="text-txt-soft" x-text="run.records_raw"></span>
-                      <span class="mx-1 text-grid-strong">/</span>
-                      <span class="text-txt-soft" x-text="run.records_normalized"></span>
+                      <div class="text-txt-soft" x-text="`${run.records_raw} API`"></div>
+                      <div class="mt-1 text-[10px] text-txt-dim" x-text="`${run.records_normalized} canonicos`"></div>
                     </td>
                     <td class="hidden px-4 py-3 text-xs text-txt-dim md:table-cell" x-text="fmtDateTime(run.started_at)"></td>
+                    <td class="hidden px-4 py-3 text-xs text-txt-dim lg:table-cell" x-text="runDuration(run.started_at, run.finished_at)"></td>
+                    <td class="px-4 py-3 text-right">
+                      <button type="button" @click="openRunInspector(run.id)"
+                        class="rounded border border-grid bg-bp px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-txt-soft transition-all hover:border-line hover:text-txt">
+                        Ver
+                      </button>
+                    </td>
                   </tr>
                 </template>
               </tbody>
             </table>
-            <div x-show="runs.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin corridas recientes.</div>
+            <div x-show="runs.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin ejecuciones recientes.</div>
           </div>
         </section>
 
@@ -795,42 +808,122 @@
               <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
                 <tr>
                   <th class="px-4 py-3 text-left font-semibold">ID ext.</th>
-                  <th class="px-4 py-3 text-left font-semibold">SKU</th>
                   <th class="px-4 py-3 text-left font-semibold">Nombre</th>
-                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Categoria</th>
-                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Unidad</th>
+                  <th class="px-4 py-3 text-left font-semibold">SKU</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Fuente</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Variantes</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Estado</th>
                 </tr>
               </thead>
               <tbody>
                 <template x-for="(p, idx) in dataProducts" :key="p.id">
                   <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
                     <td class="px-4 py-3 text-xs text-txt-dim" x-text="p.external_id"></td>
-                    <td class="px-4 py-3 text-xs text-txt-soft" x-text="p.sku ?? '—'"></td>
                     <td class="px-4 py-3 text-sm font-medium text-txt" x-text="p.name"></td>
-                    <td class="hidden px-4 py-3 text-xs text-txt-muted md:table-cell" x-text="p.category ?? '—'"></td>
-                    <td class="hidden px-4 py-3 text-xs text-txt-muted md:table-cell" x-text="p.unit ?? '—'"></td>
+                    <td class="px-4 py-3 text-xs text-txt-soft" x-text="p.sku ?? '—'"></td>
+                    <td class="hidden px-4 py-3 text-xs text-txt-muted md:table-cell" x-text="p.source_system"></td>
+                    <td class="hidden px-4 py-3 text-xs text-txt-muted md:table-cell" x-text="p.variant_count"></td>
+                    <td class="hidden px-4 py-3 text-xs md:table-cell">
+                      <span class="rounded border px-2 py-1 font-semibold uppercase tracking-wide"
+                        :class="p.is_active ? 'border-green-border bg-green-soft text-green-text' : 'border-red-border bg-red-soft text-red-text'"
+                        x-text="p.is_active ? 'activo' : 'inactivo'"></span>
+                    </td>
                   </tr>
                 </template>
               </tbody>
             </table>
           </div>
 
-          <div x-show="activeDataTab === 'branches' && !dataLoading" class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
-            <div x-show="dataBranches.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin sucursales.</div>
-            <table x-show="dataBranches.length > 0" class="w-full text-sm">
+          <div x-show="activeDataTab === 'locations' && !dataLoading" class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
+            <div x-show="dataLocations.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin ubicaciones.</div>
+            <table x-show="dataLocations.length > 0" class="w-full text-sm">
               <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
                 <tr>
                   <th class="px-4 py-3 text-left font-semibold">ID ext.</th>
                   <th class="px-4 py-3 text-left font-semibold">Nombre</th>
-                  <th class="px-4 py-3 text-left font-semibold">Codigo</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Tipo</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Ciudad</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Direccion</th>
+                  <th class="px-4 py-3 text-left font-semibold">Estado</th>
                 </tr>
               </thead>
               <tbody>
-                <template x-for="(b, idx) in dataBranches" :key="b.id">
+                <template x-for="(loc, idx) in dataLocations" :key="loc.id">
                   <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
-                    <td class="px-4 py-3 text-xs text-txt-dim" x-text="b.external_id"></td>
-                    <td class="px-4 py-3 text-sm font-medium text-txt" x-text="b.name"></td>
-                    <td class="px-4 py-3 text-xs text-txt-muted" x-text="b.code ?? '—'"></td>
+                    <td class="px-4 py-3 text-xs text-txt-dim" x-text="loc.external_id"></td>
+                    <td class="px-4 py-3 text-sm font-medium text-txt" x-text="loc.name"></td>
+                    <td class="hidden px-4 py-3 text-xs text-txt-muted md:table-cell" x-text="loc.type ?? '—'"></td>
+                    <td class="hidden px-4 py-3 text-xs text-txt-muted md:table-cell" x-text="loc.city ?? '—'"></td>
+                    <td class="hidden px-4 py-3 text-xs text-txt-muted md:table-cell" x-text="loc.address ?? '—'"></td>
+                    <td class="px-4 py-3 text-xs">
+                      <span class="rounded border px-2 py-1 font-semibold uppercase tracking-wide"
+                        :class="loc.is_active ? 'border-green-border bg-green-soft text-green-text' : 'border-red-border bg-red-soft text-red-text'"
+                        x-text="loc.is_active ? 'activa' : 'inactiva'"></span>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+
+          <div x-show="activeDataTab === 'customers' && !dataLoading" class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
+            <div x-show="dataCustomers.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin clientes.</div>
+            <table x-show="dataCustomers.length > 0" class="w-full text-sm">
+              <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
+                <tr>
+                  <th class="px-4 py-3 text-left font-semibold">ID ext.</th>
+                  <th class="px-4 py-3 text-left font-semibold">Cliente</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Rut</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Ciudad</th>
+                  <th class="px-4 py-3 text-left font-semibold">Puntos</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Relaciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="(c, idx) in dataCustomers" :key="c.id">
+                  <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
+                    <td class="px-4 py-3 text-xs text-txt-dim" x-text="c.external_id"></td>
+                    <td class="px-4 py-3">
+                      <div class="text-sm font-medium text-txt" x-text="c.company || [c.first_name, c.last_name].filter(Boolean).join(' ') || '—'"></div>
+                      <div class="text-xs text-txt-muted" x-text="c.email ?? c.phone ?? '—'"></div>
+                    </td>
+                    <td class="hidden px-4 py-3 text-xs text-txt-muted md:table-cell" x-text="c.code ?? '—'"></td>
+                    <td class="hidden px-4 py-3 text-xs text-txt-muted md:table-cell" x-text="c.city ?? '—'"></td>
+                    <td class="px-4 py-3 text-sm font-semibold text-txt" x-text="c.points ?? 0"></td>
+                    <td class="hidden px-4 py-3 text-xs text-txt-muted md:table-cell" x-text="`${c.contact_count} c / ${c.address_count} d / ${c.attribute_count} a`"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+
+          <div x-show="activeDataTab === 'document-types' && !dataLoading" class="overflow-hidden rounded-2xl border border-grid bg-bp-card">
+            <div x-show="dataDocumentTypes.length === 0" class="px-6 py-14 text-center text-sm text-txt-muted">Sin tipos de documento.</div>
+            <table x-show="dataDocumentTypes.length > 0" class="w-full text-sm">
+              <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
+                <tr>
+                  <th class="px-4 py-3 text-left font-semibold">ID ext.</th>
+                  <th class="px-4 py-3 text-left font-semibold">Nombre</th>
+                  <th class="px-4 py-3 text-left font-semibold">SII</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Uso</th>
+                  <th class="px-4 py-3 text-left font-semibold">Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="(dt, idx) in dataDocumentTypes" :key="dt.id">
+                  <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
+                    <td class="px-4 py-3 text-xs text-txt-dim" x-text="dt.external_id"></td>
+                    <td class="px-4 py-3">
+                      <div class="text-sm font-medium text-txt" x-text="dt.name"></div>
+                      <div class="text-xs text-txt-muted" x-text="dt.is_electronic_document ? 'electronico' : 'manual'"></div>
+                    </td>
+                    <td class="px-4 py-3 text-xs text-txt-soft" x-text="dt.code_sii || '—'"></td>
+                    <td class="hidden px-4 py-3 text-xs text-txt-muted md:table-cell" x-text="dt.use"></td>
+                    <td class="px-4 py-3 text-xs">
+                      <span class="rounded border px-2 py-1 font-semibold uppercase tracking-wide"
+                        :class="dt.state === 0 ? 'border-green-border bg-green-soft text-green-text' : 'border-red-border bg-red-soft text-red-text'"
+                        x-text="dt.state === 0 ? 'activo' : 'inactivo'"></span>
+                    </td>
                   </tr>
                 </template>
               </tbody>
@@ -851,10 +944,16 @@
               <tbody>
                 <template x-for="(s, idx) in dataStock" :key="s.id">
                   <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
-                    <td class="px-4 py-3 text-xs text-txt-soft" x-text="s.product_external_id"></td>
-                    <td class="px-4 py-3 text-xs text-txt-soft" x-text="s.branch_external_id"></td>
-                    <td class="px-4 py-3 text-sm font-semibold text-txt" x-text="s.quantity"></td>
-                    <td class="hidden px-4 py-3 text-xs text-txt-dim md:table-cell" x-text="fmtDateTime(s.captured_at)"></td>
+                    <td class="px-4 py-3">
+                      <div class="text-xs text-txt-soft" x-text="s.variant_name ?? s.product_name ?? '—'"></div>
+                      <div class="text-[10px] text-txt-dim" x-text="s.variant_external_id ?? s.product_external_id"></div>
+                    </td>
+                    <td class="px-4 py-3">
+                      <div class="text-xs text-txt-soft" x-text="s.location_name ?? s.branch_name ?? '—'"></div>
+                      <div class="text-[10px] text-txt-dim" x-text="s.location_external_id ?? s.branch_external_id"></div>
+                    </td>
+                    <td class="px-4 py-3 text-sm font-semibold text-txt" x-text="s.quantity_on_hand ?? s.quantity"></td>
+                    <td class="hidden px-4 py-3 text-xs text-txt-dim md:table-cell" x-text="fmtDateTime(s.last_updated ?? s.captured_at)"></td>
                   </tr>
                 </template>
               </tbody>
@@ -867,20 +966,33 @@
               <thead class="border-b border-grid bg-bp-elevated text-[11px] uppercase tracking-[0.18em] text-txt-muted">
                 <tr>
                   <th class="px-4 py-3 text-left font-semibold">ID ext.</th>
-                  <th class="px-4 py-3 text-left font-semibold">Sucursal</th>
-                  <th class="px-4 py-3 text-left font-semibold">Cliente</th>
+                  <th class="px-4 py-3 text-left font-semibold">Estado</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Ubicacion</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Cliente ref.</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Canal / lineas</th>
                   <th class="px-4 py-3 text-left font-semibold">Total</th>
-                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Emitido</th>
+                  <th class="px-4 py-3 text-left font-semibold hidden md:table-cell">Fecha orden</th>
                 </tr>
               </thead>
               <tbody>
                 <template x-for="(sale, idx) in dataSales" :key="sale.id">
                   <tr class="border-b border-grid last:border-0 hover:bg-bp-elevated" :class="idx % 2 === 1 && 'bg-bp-card/40'">
                     <td class="px-4 py-3 text-xs text-txt-dim" x-text="sale.external_id"></td>
-                    <td class="px-4 py-3 text-xs text-txt-soft" x-text="sale.branch_external_id ?? '—'"></td>
-                    <td class="px-4 py-3 text-xs text-txt-soft" x-text="sale.customer_external_id ?? '—'"></td>
+                    <td class="px-4 py-3">
+                      <div class="text-xs text-txt-soft" x-text="sale.status ?? '—'"></div>
+                      <div class="text-[10px] text-txt-dim" x-text="sale.currency ?? '—'"></div>
+                    </td>
+                    <td class="hidden px-4 py-3 md:table-cell">
+                      <div class="text-xs text-txt-soft" x-text="sale.location_name ?? '—'"></div>
+                      <div class="text-[10px] text-txt-dim" x-text="sale.location_external_id ?? '—'"></div>
+                    </td>
+                    <td class="hidden px-4 py-3 md:table-cell">
+                      <div class="text-xs text-txt-soft" x-text="sale.customer_ref ?? '—'"></div>
+                      <div class="text-[10px] text-txt-dim" x-text="sale.source_system ?? '—'"></div>
+                    </td>
+                    <td class="hidden px-4 py-3 text-xs text-txt-soft md:table-cell" x-text="`${sale.channel ?? '—'} / ${sale.line_count ?? 0}`"></td>
                     <td class="px-4 py-3 text-sm font-semibold text-txt" x-text="'$' + Number(sale.total_amount).toLocaleString('es-CL')"></td>
-                    <td class="hidden px-4 py-3 text-xs text-txt-dim md:table-cell" x-text="fmtDateTime(sale.issued_at)"></td>
+                    <td class="hidden px-4 py-3 text-xs text-txt-dim md:table-cell" x-text="fmtDateTime(sale.order_date)"></td>
                   </tr>
                 </template>
               </tbody>
@@ -906,10 +1018,18 @@
                   <p class="mt-3 text-sm leading-relaxed text-txt" x-text="err.message"></p>
                   <p class="mt-2 text-xs text-txt-dim" x-text="fmtDateTime(err.created_at)"></p>
                 </div>
-                <button type="button" x-show="err.payload" @click="err._open = !err._open"
-                  class="rounded border border-grid px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
-                  <span x-text="err._open ? 'Ocultar' : 'Payload'"></span>
-                </button>
+                <div x-show="err.payload" class="flex items-center gap-2">
+                  <button type="button" @click="copyToClipboard(err.payload)"
+                    class="info-trigger" title="Copiar payload">
+                    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V5a2 2 0 012-2h7a2 2 0 012 2v9a2 2 0 01-2 2h-2M8 7H7a2 2 0 00-2 2v10a2 2 0 002 2h7a2 2 0 002-2v-1M8 7h7a2 2 0 012 2v1"/>
+                    </svg>
+                  </button>
+                  <button type="button" @click="err._open = !err._open"
+                    class="rounded border border-grid px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-txt-muted transition-all hover:border-line hover:text-txt-soft">
+                    <span x-text="err._open ? 'Ocultar' : 'Payload'"></span>
+                  </button>
+                </div>
               </div>
               <pre x-show="err._open" x-transition class="mt-3 overflow-x-auto rounded border border-grid bg-bp p-3 text-xs text-txt-soft" x-text="JSON.stringify(err.payload, null, 2)"></pre>
             </div>
@@ -935,7 +1055,17 @@
                   <p class="mt-2 text-sm text-txt" x-text="row.target_label ?? row.target_id ?? 'sin etiqueta'"></p>
                   <p class="mt-1 text-xs text-txt-dim" x-text="fmtDateTime(row.created_at)"></p>
                 </div>
-                <pre class="w-full overflow-x-auto rounded border border-grid bg-bp p-3 text-xs text-txt-soft md:w-[420px]" x-text="JSON.stringify(row.payload ?? {}, null, 2)"></pre>
+                <div class="w-full md:w-[420px]">
+                  <div class="mb-2 flex justify-end">
+                    <button type="button" @click="copyToClipboard(row.payload ?? {})"
+                      class="info-trigger" title="Copiar payload auditado">
+                      <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V5a2 2 0 012-2h7a2 2 0 012 2v9a2 2 0 01-2 2h-2M8 7H7a2 2 0 00-2 2v10a2 2 0 002 2h7a2 2 0 002-2v-1M8 7h7a2 2 0 012 2v1"/>
+                      </svg>
+                    </button>
+                  </div>
+                  <pre class="w-full overflow-x-auto rounded border border-grid bg-bp p-3 text-xs text-txt-soft" x-text="JSON.stringify(row.payload ?? {}, null, 2)"></pre>
+                </div>
               </div>
             </div>
           </template>
@@ -1096,6 +1226,143 @@
     </div>
   </div>
 
+  <div x-show="runInspector.open" x-cloak x-transition.opacity @keydown.escape.window="closeRunInspector()"
+    class="fixed inset-0 z-[65] flex items-center justify-center bg-black/30 px-4 py-6" @click.self="closeRunInspector()">
+    <div class="glass flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-line bg-bp-card shadow-2xl">
+      <div class="flex items-start justify-between gap-4 border-b border-grid px-5 py-4">
+        <div>
+          <p class="text-[11px] uppercase tracking-[0.28em] text-txt-dim">Inspector de ejecuciones</p>
+          <h3 class="mt-2 text-lg font-semibold uppercase tracking-[0.14em] text-txt" x-text="runInspector.detail?.run ? `Ejecucion #${runInspector.detail.run.id}` : 'Ejecucion'"></h3>
+          <p class="mt-1 text-xs text-txt-muted" x-show="runInspector.detail?.run">
+            <span x-text="runInspector.detail?.run?.job_label"></span>
+            <span class="text-txt-dim"> · </span>
+            <span x-text="runInspector.detail?.run?.connection_name"></span>
+          </p>
+        </div>
+        <button type="button" class="info-trigger" title="Cerrar" @click="closeRunInspector()">
+          <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="flex-1 overflow-y-auto px-5 py-4">
+        <div x-show="runInspector.loading" class="rounded-xl border border-grid bg-bp px-5 py-10 text-center text-sm text-txt-muted">Cargando detalle...</div>
+
+        <div x-show="!runInspector.loading && runInspector.detail" class="space-y-5">
+          <div class="grid gap-3 md:grid-cols-5">
+            <div class="rounded-xl border border-grid bg-bp p-4">
+              <p class="text-[10px] uppercase tracking-[0.24em] text-txt-dim">Estado</p>
+              <p class="mt-2 text-sm font-semibold text-txt" x-text="runInspector.detail.run.status"></p>
+            </div>
+            <div class="rounded-xl border border-grid bg-bp p-4">
+              <p class="text-[10px] uppercase tracking-[0.24em] text-txt-dim">API / Canonicos</p>
+              <p class="mt-2 text-sm font-semibold text-txt">
+                <span x-text="runInspector.detail.run.records_raw"></span>
+                <span class="text-grid-strong"> / </span>
+                <span x-text="runInspector.detail.run.records_normalized"></span>
+              </p>
+              <p class="mt-2 text-[10px] leading-relaxed text-txt-dim">API = payloads guardados. Canonicos = registros persistidos o movimientos generados.</p>
+            </div>
+            <div class="rounded-xl border border-grid bg-bp p-4">
+              <p class="text-[10px] uppercase tracking-[0.24em] text-txt-dim">Inicio</p>
+              <p class="mt-2 text-xs text-txt-soft" x-text="fmtDateTime(runInspector.detail.run.started_at)"></p>
+            </div>
+            <div class="rounded-xl border border-grid bg-bp p-4">
+              <p class="text-[10px] uppercase tracking-[0.24em] text-txt-dim">Fin</p>
+              <p class="mt-2 text-xs text-txt-soft" x-text="fmtDateTime(runInspector.detail.run.finished_at)"></p>
+            </div>
+            <div class="rounded-xl border border-grid bg-bp p-4">
+              <p class="text-[10px] uppercase tracking-[0.24em] text-txt-dim">Duracion</p>
+              <p class="mt-2 text-xs text-txt-soft" x-text="runDuration(runInspector.detail.run.started_at, runInspector.detail.run.finished_at)"></p>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-grid bg-bp-card">
+            <div class="flex items-center justify-between border-b border-grid px-4 py-3">
+              <h4 class="text-sm font-semibold uppercase tracking-[0.14em] text-txt">Errores</h4>
+              <span class="text-xs text-txt-dim" x-text="runInspector.detail.errors.length"></span>
+            </div>
+            <div x-show="runInspector.detail.errors.length === 0" class="px-4 py-6 text-sm text-txt-muted">Sin errores asociados a esta ejecucion.</div>
+            <div class="divide-y divide-grid" x-show="runInspector.detail.errors.length > 0">
+              <template x-for="error in runInspector.detail.errors" :key="error.id">
+                <div class="px-4 py-4">
+                  <div class="flex items-start justify-between gap-3">
+                    <div>
+                      <p class="text-sm font-semibold text-red-text" x-text="error.message"></p>
+                      <p class="mt-1 text-xs text-txt-dim" x-text="fmtDateTime(error.created_at)"></p>
+                    </div>
+                  </div>
+                  <div x-show="error.payload" class="mt-3">
+                    <div class="mb-2 flex justify-end">
+                      <button type="button" @click="copyToClipboard(error.payload)"
+                        class="info-trigger" title="Copiar error">
+                        <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                          <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V5a2 2 0 012-2h7a2 2 0 012 2v9a2 2 0 01-2 2h-2M8 7H7a2 2 0 00-2 2v10a2 2 0 002 2h7a2 2 0 002-2v-1M8 7h7a2 2 0 012 2v1"/>
+                        </svg>
+                      </button>
+                    </div>
+                    <pre class="overflow-x-auto rounded border border-grid bg-bp p-3 text-xs text-txt-soft" x-text="prettyJson(error.payload)"></pre>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-grid bg-bp-card">
+            <div class="flex items-center justify-between border-b border-grid px-4 py-3">
+              <h4 class="text-sm font-semibold uppercase tracking-[0.14em] text-txt">Steps / Endpoints</h4>
+              <span class="text-xs text-txt-dim" x-text="runInspector.detail.steps.length"></span>
+            </div>
+            <div x-show="runInspector.detail.steps.length === 0" class="px-4 py-6 text-sm text-txt-muted">Esta ejecucion no guardo payloads raw.</div>
+            <div class="divide-y divide-grid" x-show="runInspector.detail.steps.length > 0">
+              <template x-for="(step, idx) in runInspector.detail.steps" :key="step.endpoint + ':' + idx">
+                <div class="px-4 py-4">
+                  <div class="flex items-center justify-between gap-4">
+                    <div>
+                      <p class="text-sm font-semibold text-txt" x-text="step.endpoint"></p>
+                      <p class="mt-1 text-xs text-txt-dim">
+                        <span x-text="step.record_count"></span> payloads raw guardados
+                      </p>
+                    </div>
+                    <button type="button" @click="toggleRunStep(step.endpoint)"
+                      class="rounded border border-grid bg-bp px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-txt-soft transition-all hover:border-line hover:text-txt">
+                      <span x-text="runStepOpen[step.endpoint] ? 'Ocultar' : 'Ver payloads'"></span>
+                    </button>
+                  </div>
+                  <div x-show="runStepOpen[step.endpoint]" x-transition class="mt-4 space-y-4">
+                    <template x-for="rawObject in step.raw_objects" :key="rawObject.id">
+                      <div class="rounded-xl border border-grid bg-bp p-4">
+                        <div class="flex flex-wrap items-center justify-between gap-3">
+                          <div class="flex flex-wrap gap-2 text-[10px] uppercase tracking-wide text-txt-dim">
+                            <span class="rounded border border-grid bg-bp-card px-2 py-1">raw #<span x-text="rawObject.id"></span></span>
+                            <span class="rounded border border-grid bg-bp-card px-2 py-1" x-text="rawObject.checksum"></span>
+                          </div>
+                          <span class="text-xs text-txt-dim" x-text="fmtDateTime(rawObject.fetched_at)"></span>
+                        </div>
+                        <div class="mt-3">
+                          <div class="mb-2 flex justify-end">
+                            <button type="button" @click="copyToClipboard(rawObject.payload)"
+                              class="info-trigger" title="Copiar payload raw">
+                              <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V5a2 2 0 012-2h7a2 2 0 012 2v9a2 2 0 01-2 2h-2M8 7H7a2 2 0 00-2 2v10a2 2 0 002 2h7a2 2 0 002-2v-1M8 7h7a2 2 0 012 2v1"/>
+                              </svg>
+                            </button>
+                          </div>
+                          <pre class="overflow-x-auto rounded border border-grid bg-bp-card p-3 text-xs text-txt-soft" x-text="prettyJson(rawObject.payload)"></pre>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast notifications -->
   <div class="pointer-events-none fixed bottom-5 right-5 z-50 flex flex-col gap-2">
     <template x-for="toast in toasts" :key="toast.id">
@@ -1109,6 +1376,7 @@
   </div>
 
   <script>
+    const TENANT_STORAGE_KEY = 'selectedTenantId'
     function app() {
       return {
         health: null,
@@ -1153,6 +1421,12 @@
           title: '',
           lines: [],
         },
+        runInspector: {
+          open: false,
+          loading: false,
+          detail: null,
+        },
+        runStepOpen: {},
         toasts: [],
         _interval: null,
 
@@ -1167,12 +1441,16 @@
         dataLoading: false,
         dataStats: {},
         dataProducts: [],
-        dataBranches: [],
+        dataLocations: [],
+        dataCustomers: [],
+        dataDocumentTypes: [],
         dataStock: [],
         dataSales: [],
         dataTabs: [
           { id: 'products', label: 'Productos' },
-          { id: 'branches', label: 'Sucursales' },
+          { id: 'locations', label: 'Ubicaciones' },
+          { id: 'customers', label: 'Clientes' },
+          { id: 'document-types', label: 'Doc types' },
           { id: 'stock', label: 'Stock' },
           { id: 'sales', label: 'Ventas' },
         ],
@@ -1195,7 +1473,7 @@
           overview: 'Mapa de integraciones',
           connectors: 'Gestionar conexiones',
           jobs: 'Jobs provisionados',
-          runs: 'Corridas de ejecucion',
+          runs: 'Ejecuciones',
           data: 'Modelo canonico',
           errors: 'Registro de errores',
           audit: 'Audit trail',
@@ -1216,7 +1494,7 @@
             { id: 'overview', label: 'Overview', badge: this.overview?.totals?.connections_total ?? null, icon: this._navIcons.overview },
             { id: 'connectors', label: 'Conectores', badge: this.connectors.length || null, icon: this._navIcons.connectors },
             { id: 'jobs', label: 'Jobs', badge: this.jobs.length || null, icon: this._navIcons.jobs },
-            { id: 'runs', label: 'Corridas', badge: running > 0 ? `${running} live` : (this.runs.length || null), badgeClass: running > 0 ? 'border-cyan-border bg-cyan-soft text-cyan-text' : 'border-grid bg-bp text-txt-muted', icon: this._navIcons.runs },
+            { id: 'runs', label: 'Ejecuciones', badge: running > 0 ? `${running} live` : (this.runs.length || null), badgeClass: running > 0 ? 'border-cyan-border bg-cyan-soft text-cyan-text' : 'border-grid bg-bp text-txt-muted', icon: this._navIcons.runs },
             { id: 'data', label: 'Data', badge: null, icon: this._navIcons.data },
             { id: 'errors', label: 'Errores', badge: this.errors.length || null, badgeClass: 'border-red-border bg-red-soft text-red-text', icon: this._navIcons.errors },
             { id: 'audit', label: 'Audit', badge: this.auditLogs.length || null, icon: this._navIcons.audit },
@@ -1259,6 +1537,31 @@
         closeInfo() {
           this.infoModal = { open: false, title: '', lines: [] }
           document.documentElement.classList.remove('overflow-hidden')
+        },
+
+        async openRunInspector(runId) {
+          if (!this.selectedTenantId) return
+          this.runInspector = { open: true, loading: true, detail: null }
+          this.runStepOpen = {}
+          document.documentElement.classList.add('overflow-hidden')
+          try {
+            const detail = await this._fetchJson(this.tenantScopedUrl(`/admin/runs/${runId}`))
+            this.runInspector = { open: true, loading: false, detail }
+          } catch (error) {
+            this.runInspector = { open: false, loading: false, detail: null }
+            document.documentElement.classList.remove('overflow-hidden')
+            this.notify('error', error.message)
+          }
+        },
+
+        closeRunInspector() {
+          this.runInspector = { open: false, loading: false, detail: null }
+          this.runStepOpen = {}
+          document.documentElement.classList.remove('overflow-hidden')
+        },
+
+        toggleRunStep(endpoint) {
+          this.runStepOpen = { ...this.runStepOpen, [endpoint]: !this.runStepOpen[endpoint] }
         },
 
         tenantScopedUrl(url) {
@@ -1320,15 +1623,21 @@
           this.editorDirty = {}
           this.editorStatus = {}
           this.editorStatusType = {}
+          this.runInspector = { open: false, loading: false, detail: null }
+          this.runStepOpen = {}
           this.dataStats = {}
           this.dataProducts = []
-          this.dataBranches = []
+          this.dataLocations = []
+          this.dataCustomers = []
+          this.dataDocumentTypes = []
           this.dataStock = []
           this.dataSales = []
         },
 
         async changeTenant(rawTenantId) {
           this.selectedTenantId = rawTenantId ? Number(rawTenantId) : null
+          if (this.selectedTenantId) localStorage.setItem(TENANT_STORAGE_KEY, String(this.selectedTenantId))
+          else localStorage.removeItem(TENANT_STORAGE_KEY)
           this.clearTenantScopedState()
           await this.refresh()
           if (this.activeTab === 'data') await this.loadDataTab(this.activeDataTab)
@@ -1479,8 +1788,17 @@
           try {
             const tenants = await this._fetchArray('/admin/tenants')
             this.tenants = tenants
-            if (!this.selectedTenantId || !tenants.some(tenant => tenant.id === Number(this.selectedTenantId))) {
+            const persistedTenantId = Number(localStorage.getItem(TENANT_STORAGE_KEY) || '')
+            const hasCurrent = tenants.some(tenant => tenant.id === Number(this.selectedTenantId))
+            const hasPersisted = persistedTenantId && tenants.some(tenant => tenant.id === persistedTenantId)
+            if (hasCurrent) {
+              localStorage.setItem(TENANT_STORAGE_KEY, String(this.selectedTenantId))
+            } else if (hasPersisted) {
+              this.selectedTenantId = persistedTenantId
+            } else {
               this.selectedTenantId = tenants.length > 0 ? tenants[0].id : null
+              if (this.selectedTenantId) localStorage.setItem(TENANT_STORAGE_KEY, String(this.selectedTenantId))
+              else localStorage.removeItem(TENANT_STORAGE_KEY)
             }
           } catch (e) { console.error('[fetchTenants]', e) }
         },
@@ -1533,7 +1851,9 @@
             this.dataStats = { ...this.dataStats, [tab]: data.total }
             const items = Array.isArray(data.items) ? data.items : []
             if (tab === 'products') this.dataProducts = items
-            if (tab === 'branches') this.dataBranches = items
+            if (tab === 'locations') this.dataLocations = items
+            if (tab === 'customers') this.dataCustomers = items
+            if (tab === 'document-types') this.dataDocumentTypes = items
             if (tab === 'stock') this.dataStock = items
             if (tab === 'sales') this.dataSales = items
           } catch (error) {
@@ -1795,7 +2115,7 @@
             const run = await response.json()
             await Promise.all([this.fetchRuns(), this.fetchAudit(), this.fetchOverview()])
             this.navigate('runs')
-            this.notify('success', `Run #${run.id} encolado`)
+            this.notify('success', `Ejecucion #${run.id} encolada`)
           } catch (error) {
             this.notify('error', error.message)
           } finally {
@@ -1870,6 +2190,49 @@
         fmtDateTime(iso) {
           if (!iso) return '—'
           return new Date(iso + 'Z').toLocaleString('es-CL', { dateStyle: 'short', timeStyle: 'medium' })
+        },
+
+        runDuration(startIso, endIso) {
+          if (!startIso) return '—'
+          const start = new Date(startIso + 'Z').getTime()
+          const end = endIso ? new Date(endIso + 'Z').getTime() : Date.now()
+          if (Number.isNaN(start) || Number.isNaN(end) || end < start) return '—'
+          const totalSeconds = Math.floor((end - start) / 1000)
+          if (totalSeconds < 1) return '<1s'
+          if (totalSeconds < 60) return `${totalSeconds}s`
+          const minutes = Math.floor(totalSeconds / 60)
+          const seconds = totalSeconds % 60
+          if (minutes < 60) return `${minutes}m ${seconds}s`
+          const hours = Math.floor(minutes / 60)
+          const remMinutes = minutes % 60
+          return `${hours}h ${remMinutes}m`
+        },
+
+        prettyJson(value) {
+          return JSON.stringify(value ?? {}, null, 2)
+        },
+
+        async copyToClipboard(value) {
+          const text = typeof value === 'string' ? value : this.prettyJson(value)
+          try {
+            if (navigator.clipboard?.writeText) {
+              await navigator.clipboard.writeText(text)
+            } else {
+              const textarea = document.createElement('textarea')
+              textarea.value = text
+              textarea.setAttribute('readonly', '')
+              textarea.style.position = 'absolute'
+              textarea.style.left = '-9999px'
+              document.body.appendChild(textarea)
+              textarea.select()
+              document.execCommand('copy')
+              document.body.removeChild(textarea)
+            }
+            this.notify('success', 'Copiado al portapapeles')
+          } catch (error) {
+            console.error('[copyToClipboard]', error)
+            this.notify('error', 'No se pudo copiar')
+          }
         },
 
         notify(type, message) {

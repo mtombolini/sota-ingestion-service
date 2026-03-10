@@ -13,12 +13,6 @@ from app.core.database import get_db
 from app.jobs.tasks import execute_run
 from app.models import (
     AdminAuditLog,
-    Branch,
-    Client,
-    ClientAddress,
-    ClientAttribute,
-    ClientContact,
-    DocumentType,
     IntegrationConnection,
     IntegrationError,
     IntegrationJob,
@@ -27,12 +21,12 @@ from app.models import (
     IntegrationOutboxEvent,
     IntegrationRawObject,
     IntegrationSecret,
+    Location,
     Product,
-    ProductTax,
-    ProductVariant,
-    SalesDocument,
-    SalesDocumentLine,
-    StockSnapshot,
+    SalesOrder,
+    SalesOrderLine,
+    Stock,
+    Variant,
     Tenant,
 )
 from app.providers import provider_registry
@@ -52,6 +46,9 @@ from app.schemas.admin import (
     OverviewConnectionResponse,
     ProviderJobResponse,
     ProviderResponse,
+    RunDetailResponse,
+    RunRawObjectResponse,
+    RunStepResponse,
     TenantCreateRequest,
     TenantOverviewResponse,
     TenantResponse,
@@ -97,11 +94,11 @@ class ConnectionHealthStats(BaseModel):
 
 JOB_LABELS = {
     "sync_product_catalog": "Catalogo",
-    "sync_customers": "Clientes",
-    "sync_document_types": "Tipos de documento",
-    "sync_stock_snapshot": "Stock",
-    "sync_sales_documents": "Ventas",
-    "sync_branches": "Sucursales",
+    "sync_locations": "Ubicaciones",
+    "sync_stock": "Stock",
+    "sync_sales_orders": "Ventas",
+    "sync_customers": "Clientes (raw)",
+    "sync_document_types": "Tipos de documento (raw)",
 }
 
 
@@ -260,8 +257,71 @@ def _provision_jobs_for_connection(db: Session, conn: IntegrationConnection, *, 
     return created
 
 
-def _connection_health_stats(db: Session, conn: IntegrationConnection) -> ConnectionHealthStats:
+def _legacy_job_aliases_for_provider(provider_key: str) -> dict[str, str]:
+    if provider_key == "bsale":
+        return {
+            "sync_branches": "sync_locations",
+            "sync_stock_snapshot": "sync_stock",
+            "sync_sales_documents": "sync_sales_orders",
+            "sync_stock_receptions": "sync_stock",
+            "sync_stock_consumptions": "sync_stock",
+        }
+    return {}
+
+
+def _delete_job_with_artifacts(db: Session, job: IntegrationJob) -> int:
+    run_ids = db.scalars(select(IntegrationJobRun.id).where(IntegrationJobRun.job_id == job.id)).all()
+    if run_ids:
+        db.execute(IntegrationRawObject.__table__.delete().where(IntegrationRawObject.job_run_id.in_(run_ids)))
+        db.execute(IntegrationError.__table__.delete().where(IntegrationError.job_run_id.in_(run_ids)))
+        db.execute(IntegrationJobRun.__table__.delete().where(IntegrationJobRun.id.in_(run_ids)))
+    db.execute(IntegrationJob.__table__.delete().where(IntegrationJob.id == job.id))
+    return 1
+
+
+def _prune_jobs_for_connection(db: Session, conn: IntegrationConnection) -> int:
+    provider = _provider_or_400(conn.provider)
+    supported_job_types = {job.job_type for job in provider.jobs}
+    alias_map = _legacy_job_aliases_for_provider(conn.provider)
     jobs = db.scalars(select(IntegrationJob).where(IntegrationJob.connection_id == conn.id).order_by(IntegrationJob.id)).all()
+
+    canonical_jobs = {
+        job.job_type: job
+        for job in jobs
+        if job.job_type in supported_job_types
+    }
+
+    changes = 0
+    for job in jobs:
+        target_job_type = alias_map.get(job.job_type, job.job_type if job.job_type in supported_job_types else None)
+        if target_job_type is None:
+            changes += _delete_job_with_artifacts(db, job)
+            continue
+
+        canonical = canonical_jobs.get(target_job_type)
+        if canonical is None:
+            continue
+        if canonical.id == job.id:
+            continue
+
+        canonical.is_enabled = canonical.is_enabled or job.is_enabled
+        db.execute(IntegrationJobRun.__table__.update().where(IntegrationJobRun.job_id == job.id).values(job_id=canonical.id))
+        db.execute(IntegrationJob.__table__.delete().where(IntegrationJob.id == job.id))
+        changes += 1
+
+    return changes
+
+
+def _reconcile_jobs_for_connections(db: Session, connections: list[IntegrationConnection], *, enabled: bool = False) -> int:
+    changes = 0
+    for conn in connections:
+        changes += len(_provision_jobs_for_connection(db, conn, enabled=enabled))
+        changes += _prune_jobs_for_connection(db, conn)
+    return changes
+
+
+def _connection_health_stats(db: Session, conn: IntegrationConnection) -> ConnectionHealthStats:
+    jobs = _jobs_for_connection(db, conn)
     job_ids = [job.id for job in jobs]
     jobs_total = len(jobs)
     jobs_enabled = sum(1 for job in jobs if job.is_enabled)
@@ -442,6 +502,7 @@ def _run_response(db: Session, run: IntegrationJobRun) -> JobRunResponse:
         provider=conn.provider,
         provider_label=provider.display_name,
         job_type=job.job_type,
+        job_label=JOB_LABELS.get(job.job_type, job.job_type),
         status=run.status,
         correlation_id=run.correlation_id,
         started_at=run.started_at,
@@ -452,7 +513,21 @@ def _run_response(db: Session, run: IntegrationJobRun) -> JobRunResponse:
 
 
 def _jobs_for_connection(db: Session, conn: IntegrationConnection) -> list[IntegrationJob]:
-    return db.scalars(select(IntegrationJob).where(IntegrationJob.connection_id == conn.id).order_by(IntegrationJob.id)).all()
+    provider = _provider_or_400(conn.provider)
+    supported_job_types = {job.job_type for job in provider.jobs}
+    jobs = db.scalars(select(IntegrationJob).where(IntegrationJob.connection_id == conn.id).order_by(IntegrationJob.id.desc())).all()
+
+    canonical_by_type: dict[str, IntegrationJob] = {}
+    for job in jobs:
+        if job.job_type not in supported_job_types:
+            continue
+        canonical_by_type.setdefault(job.job_type, job)
+
+    provider_order = {job.job_type: idx for idx, job in enumerate(provider.jobs)}
+    return sorted(
+        canonical_by_type.values(),
+        key=lambda job: (provider_order.get(job.job_type, 999), job.id),
+    )
 
 
 def _record_connection_error(db: Session, conn: IntegrationConnection, *, message: str) -> None:
@@ -552,12 +627,12 @@ def delete_tenant(tenant_id: int, force: bool = False, request: Request = None, 
     tenant_name = tenant.name
     tenant_slug = tenant.slug
     # Delete all tenant-scoped data in FK-safe order
-    # 1. Sales document lines (FK → sales_documents)
-    sales_doc_ids = db.scalars(select(SalesDocument.id).where(SalesDocument.tenant_id == tenant_id)).all()
-    if sales_doc_ids:
-        db.execute(SalesDocumentLine.__table__.delete().where(SalesDocumentLine.sales_document_id.in_(sales_doc_ids)))
+    # 1. Sales order lines (FK → sales_orders)
+    sales_order_ids = db.scalars(select(SalesOrder.id).where(SalesOrder.tenant_id == tenant_id)).all()
+    if sales_order_ids:
+        db.execute(SalesOrderLine.__table__.delete().where(SalesOrderLine.sales_order_id.in_(sales_order_ids)))
     # 2. Tables with FK to tenant only (or to job_runs)
-    for model in (SalesDocument, StockSnapshot, ClientAttribute, ClientAddress, ClientContact, Client, ProductTax, ProductVariant, Product, DocumentType, Branch, IntegrationError, IntegrationOutboxEvent, IntegrationMapping, IntegrationSecret, AdminAuditLog):
+    for model in (SalesOrder, Stock, Product, Location, IntegrationError, IntegrationOutboxEvent, IntegrationMapping, IntegrationSecret, AdminAuditLog):
         db.execute(model.__table__.delete().where(model.tenant_id == tenant_id))
     # 3. Raw objects (FK → job_runs) and job runs (FK → jobs)
     job_ids = db.scalars(select(IntegrationJob.id).where(IntegrationJob.tenant_id == tenant_id)).all()
@@ -617,8 +692,16 @@ def tenant_overview(tenant_id: int | None = None, db: Session = Depends(get_db))
         .where(IntegrationConnection.tenant_id == tenant.id)
         .order_by(IntegrationConnection.provider, IntegrationConnection.priority, IntegrationConnection.id)
     ).all()
+    if _reconcile_jobs_for_connections(db, list(connections)):
+        db.commit()
+        connections = db.scalars(
+            select(IntegrationConnection)
+            .where(IntegrationConnection.tenant_id == tenant.id)
+            .order_by(IntegrationConnection.provider, IntegrationConnection.priority, IntegrationConnection.id)
+        ).all()
     overview_connections = []
     healthy = 0
+    canonical_jobs = [job for conn in connections for job in _jobs_for_connection(db, conn)]
     for conn in connections:
         stats = _connection_health_stats(db, conn)
         if conn.status == "healthy":
@@ -646,13 +729,8 @@ def tenant_overview(tenant_id: int | None = None, db: Session = Depends(get_db))
         "connections_total": len(connections),
         "connections_healthy": healthy,
         "connections_primary": sum(1 for conn in connections if conn.is_primary),
-        "jobs_total": int(db.scalar(select(func.count()).select_from(IntegrationJob).where(IntegrationJob.tenant_id == tenant.id)) or 0),
-        "jobs_enabled": int(
-            db.scalar(
-                select(func.count()).select_from(IntegrationJob).where(IntegrationJob.tenant_id == tenant.id, IntegrationJob.is_enabled.is_(True))
-            )
-            or 0
-        ),
+        "jobs_total": len(canonical_jobs),
+        "jobs_enabled": sum(1 for job in canonical_jobs if job.is_enabled),
         "errors_recent": int(db.scalar(select(func.count()).select_from(IntegrationError).where(IntegrationError.tenant_id == tenant.id)) or 0),
         "outbox_pending": int(
             db.scalar(
@@ -675,6 +753,13 @@ def list_connectors(tenant_id: int | None = None, db: Session = Depends(get_db))
         .where(IntegrationConnection.tenant_id == tenant.id)
         .order_by(IntegrationConnection.provider, IntegrationConnection.priority, IntegrationConnection.id)
     ).all()
+    if _reconcile_jobs_for_connections(db, list(conns)):
+        db.commit()
+        conns = db.scalars(
+            select(IntegrationConnection)
+            .where(IntegrationConnection.tenant_id == tenant.id)
+            .order_by(IntegrationConnection.provider, IntegrationConnection.priority, IntegrationConnection.id)
+        ).all()
     return [_connection_to_response(db, conn) for conn in conns]
 
 
@@ -711,7 +796,7 @@ def create_connector(
     message = provider.apply_configuration(db, conn, payload | {"name": name}, secret_store=get_secret_store())
     should_be_primary = body.is_primary or not _has_primary_connection(db, tenant.id, body.provider)
     _set_primary_connection(db, conn, make_primary=should_be_primary)
-    _provision_jobs_for_connection(db, conn, enabled=False)
+    _reconcile_jobs_for_connections(db, [conn], enabled=False)
     _record_audit(
         db,
         tenant_id=tenant.id,
@@ -748,7 +833,7 @@ def update_connector(
     elif body.is_primary is False and conn.is_primary:
         _set_primary_connection(db, conn, make_primary=False)
 
-    _provision_jobs_for_connection(db, conn, enabled=False)
+    _reconcile_jobs_for_connections(db, [conn], enabled=False)
     _record_audit(
         db,
         tenant_id=tenant.id,
@@ -773,6 +858,7 @@ def check_connector(
 ) -> AdminConnectionResponse:
     tenant = _resolve_tenant(db, tenant_id)
     conn = _connection_for_tenant(db, tenant.id, conn_id)
+    _reconcile_jobs_for_connections(db, [conn], enabled=False)
     provider = _provider_or_400(conn.provider)
     result = provider.check_connection(db, conn, secret_store=get_secret_store())
     if not result.connected:
@@ -821,7 +907,7 @@ def make_connector_primary(
 def get_connector_jobs(conn_id: int, tenant_id: int | None = None, db: Session = Depends(get_db)) -> ConnectorJobsResponse:
     tenant = _resolve_tenant(db, tenant_id)
     conn = _connection_for_tenant(db, tenant.id, conn_id)
-    _provision_jobs_for_connection(db, conn, enabled=False)
+    _reconcile_jobs_for_connections(db, [conn], enabled=False)
     jobs = _jobs_for_connection(db, conn)
     return ConnectorJobsResponse(
         connection_id=conn.id,
@@ -841,7 +927,7 @@ def set_connector_jobs_enabled(
 ) -> ConnectorJobsResponse:
     tenant = _resolve_tenant(db, tenant_id)
     conn = _connection_for_tenant(db, tenant.id, conn_id)
-    _provision_jobs_for_connection(db, conn, enabled=body.enabled)
+    _reconcile_jobs_for_connections(db, [conn], enabled=body.enabled)
     jobs = _jobs_for_connection(db, conn)
     for job in jobs:
         job.is_enabled = body.enabled
@@ -907,11 +993,12 @@ def queue_connector_sync(
 @admin_router.get("/jobs", response_model=list[JobResponse])
 def list_jobs(tenant_id: int | None = None, db: Session = Depends(get_db)) -> list[JobResponse]:
     tenant = _resolve_tenant(db, tenant_id)
-    jobs = db.scalars(
-        select(IntegrationJob)
-        .where(IntegrationJob.tenant_id == tenant.id)
-        .order_by(IntegrationJob.connection_id, IntegrationJob.id)
-    ).all()
+    connections = db.scalars(select(IntegrationConnection).where(IntegrationConnection.tenant_id == tenant.id)).all()
+    if _reconcile_jobs_for_connections(db, list(connections)):
+        db.commit()
+    jobs: list[IntegrationJob] = []
+    for conn in sorted(connections, key=lambda item: (item.provider, item.priority, item.id)):
+        jobs.extend(_jobs_for_connection(db, conn))
     return [_job_response(db, job) for job in jobs]
 
 
@@ -949,6 +1036,67 @@ def list_runs(limit: int = 30, tenant_id: int | None = None, db: Session = Depen
         .limit(limit)
     ).all()
     return [_run_response(db, run) for run in runs]
+
+
+@admin_router.get("/runs/{run_id}", response_model=RunDetailResponse)
+def get_run_detail(run_id: int, tenant_id: int | None = None, db: Session = Depends(get_db)) -> RunDetailResponse:
+    tenant = _resolve_tenant(db, tenant_id)
+    run = db.get(IntegrationJobRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="run not found")
+
+    job = db.get(IntegrationJob, run.job_id)
+    if job is None or job.tenant_id != tenant.id:
+        raise HTTPException(status_code=404, detail="run not found")
+
+    raw_rows = db.scalars(
+        select(IntegrationRawObject)
+        .where(IntegrationRawObject.job_run_id == run.id)
+        .order_by(IntegrationRawObject.id)
+    ).all()
+    steps_by_endpoint: dict[str, list[IntegrationRawObject]] = {}
+    for row in raw_rows:
+        steps_by_endpoint.setdefault(row.endpoint, []).append(row)
+
+    errors = db.scalars(
+        select(IntegrationError)
+        .where(IntegrationError.job_run_id == run.id)
+        .order_by(IntegrationError.id)
+    ).all()
+
+    return RunDetailResponse(
+        run=_run_response(db, run),
+        errors=[
+            ErrorResponse(
+                id=error.id,
+                tenant_id=error.tenant_id,
+                job_run_id=error.job_run_id,
+                object_name=error.object_name,
+                message=error.message,
+                severity=error.severity,
+                payload=error.payload,
+                created_at=error.created_at,
+            )
+            for error in errors
+        ],
+        steps=[
+            RunStepResponse(
+                endpoint=endpoint,
+                record_count=len(rows),
+                raw_objects=[
+                    RunRawObjectResponse(
+                        id=row.id,
+                        endpoint=row.endpoint,
+                        checksum=row.checksum,
+                        fetched_at=row.fetched_at,
+                        payload=row.payload,
+                    )
+                    for row in rows
+                ],
+            )
+            for endpoint, rows in steps_by_endpoint.items()
+        ],
+    )
 
 
 @admin_router.get("/errors", response_model=list[ErrorResponse])
@@ -1049,116 +1197,57 @@ def data_products(limit: int = 50, tenant_id: int | None = None, db: Session = D
     stmt = select(Product).where(Product.tenant_id == tenant.id)
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
     items = db.scalars(stmt.order_by(Product.id.desc()).limit(limit)).all()
+    variant_counts = {
+        product_id: count
+        for product_id, count in db.execute(
+            select(Variant.product_id, func.count(Variant.id))
+            .where(Variant.tenant_id == tenant.id)
+            .group_by(Variant.product_id)
+        ).all()
+    }
     return {
         "total": total,
         "items": [
             {
                 "id": p.id,
+                "source_system": p.source_system,
                 "external_id": p.external_id,
                 "sku": p.sku,
                 "name": p.name,
-                "description": p.description,
-                "classification": p.classification,
-                "product_type_id": p.product_type_id,
-                "state": p.state,
-                "category": p.category,
-                "unit": p.unit,
+                "brand": p.brand,
+                "unit_of_measure": p.unit_of_measure,
+                "unit_cost": float(p.unit_cost) if p.unit_cost is not None else None,
+                "unit_price": float(p.unit_price) if p.unit_price is not None else None,
                 "is_active": p.is_active,
-                "variant_count": len(p.variants),
+                "category_id": p.category_id,
+                "variant_count": variant_counts.get(p.id, 0),
             }
             for p in items
         ],
     }
 
 
-@admin_router.get("/data/branches")
-def data_branches(tenant_id: int | None = None, db: Session = Depends(get_db)):
+@admin_router.get("/data/locations")
+def data_locations(tenant_id: int | None = None, db: Session = Depends(get_db)):
     tenant = _resolve_tenant(db, tenant_id)
-    stmt = select(Branch).where(Branch.tenant_id == tenant.id)
+    stmt = select(Location).where(Location.tenant_id == tenant.id)
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
-    items = db.scalars(stmt.order_by(Branch.id)).all()
+    items = db.scalars(stmt.order_by(Location.id)).all()
     return {
         "total": total,
         "items": [
             {
-                "id": b.id,
-                "external_id": b.external_id,
-                "name": b.name,
-                "description": b.description,
-                "address": b.address,
-                "country": b.country,
-                "city": b.city,
-                "municipality": b.municipality,
-                "zip_code": b.zip_code,
-                "cost_center": b.cost_center,
-                "is_virtual": b.is_virtual,
-                "state": b.state,
-                "imagestion_cellar_id": b.imagestion_cellar_id,
-                "code": b.code,
+                "id": loc.id,
+                "source_system": loc.source_system,
+                "external_id": loc.external_id,
+                "name": loc.name,
+                "type": loc.type,
+                "address": loc.address,
+                "city": loc.city,
+                "region": loc.region,
+                "is_active": loc.is_active,
             }
-            for b in items
-        ],
-    }
-
-
-@admin_router.get("/data/document-types")
-def data_document_types(limit: int = 50, tenant_id: int | None = None, db: Session = Depends(get_db)):
-    tenant = _resolve_tenant(db, tenant_id)
-    stmt = select(DocumentType).where(DocumentType.tenant_id == tenant.id)
-    total = db.scalar(select(func.count()).select_from(stmt.subquery()))
-    items = db.scalars(stmt.order_by(DocumentType.id.desc()).limit(limit)).all()
-    return {
-        "total": total,
-        "items": [
-            {
-                "id": item.id,
-                "external_id": item.external_id,
-                "name": item.name,
-                "initial_number": item.initial_number,
-                "code_sii": item.code_sii,
-                "use": item.use,
-                "state": item.state,
-                "is_electronic_document": item.is_electronic_document,
-                "is_sales_note": item.is_sales_note,
-                "is_exempt": item.is_exempt,
-                "is_credit_note": item.is_credit_note,
-                "use_client": item.use_client,
-                "book_type_id": item.book_type_id,
-            }
-            for item in items
-        ],
-    }
-
-
-@admin_router.get("/data/customers")
-def data_customers(limit: int = 50, tenant_id: int | None = None, db: Session = Depends(get_db)):
-    tenant = _resolve_tenant(db, tenant_id)
-    stmt = select(Client).where(Client.tenant_id == tenant.id)
-    total = db.scalar(select(func.count()).select_from(stmt.subquery()))
-    items = db.scalars(stmt.order_by(Client.id.desc()).limit(limit)).all()
-    return {
-        "total": total,
-        "items": [
-            {
-                "id": c.id,
-                "external_id": c.external_id,
-                "first_name": c.first_name,
-                "last_name": c.last_name,
-                "email": c.email,
-                "code": c.code,
-                "company": c.company,
-                "phone": c.phone,
-                "state": c.state,
-                "activity": c.activity,
-                "city": c.city,
-                "municipality": c.municipality,
-                "points": c.points,
-                "office_external_id": c.office_external_id,
-                "contact_count": len(c.contacts),
-                "address_count": len(c.addresses),
-                "attribute_count": len(c.attributes),
-            }
-            for c in items
+            for loc in items
         ],
     }
 
@@ -1166,18 +1255,48 @@ def data_customers(limit: int = 50, tenant_id: int | None = None, db: Session = 
 @admin_router.get("/data/stock")
 def data_stock(limit: int = 50, tenant_id: int | None = None, db: Session = Depends(get_db)):
     tenant = _resolve_tenant(db, tenant_id)
-    stmt = select(StockSnapshot).where(StockSnapshot.tenant_id == tenant.id)
+    stmt = select(Stock).where(Stock.tenant_id == tenant.id)
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
-    items = db.scalars(stmt.order_by(StockSnapshot.id.desc()).limit(limit)).all()
+    items = db.scalars(stmt.order_by(Stock.id.desc()).limit(limit)).all()
+    variant_ids = {item.variant_external_id for item in items}
+    location_ids = {item.location_external_id for item in items}
+    variants = db.scalars(
+        select(Variant).where(Variant.tenant_id == tenant.id, Variant.external_id.in_(variant_ids))
+    ).all() if variant_ids else []
+    variant_names = {variant.external_id: variant.name for variant in variants}
+    variants_by_external_id = {variant.external_id: variant for variant in variants}
+    product_ids = {variant.product_id for variant in variants if variant.product_id is not None}
+    products_by_id = {
+        product.id: product
+        for product in db.scalars(select(Product).where(Product.tenant_id == tenant.id, Product.id.in_(product_ids))).all()
+    } if product_ids else {}
+    location_names = {
+        loc.external_id: loc.name
+        for loc in db.scalars(
+            select(Location).where(Location.tenant_id == tenant.id, Location.external_id.in_(location_ids))
+        ).all()
+    } if location_ids else {}
     return {
         "total": total,
         "items": [
             {
                 "id": s.id,
-                "product_external_id": s.product_external_id,
-                "branch_external_id": s.branch_external_id,
-                "quantity": float(s.quantity),
-                "captured_at": s.captured_at.isoformat(),
+                "source_system": s.source_system,
+                "variant_external_id": s.variant_external_id,
+                "variant_name": variant_names.get(s.variant_external_id),
+                "product_name": (
+                    products_by_id.get(variants_by_external_id[s.variant_external_id].product_id).name
+                    if s.variant_external_id in variants_by_external_id
+                    and variants_by_external_id[s.variant_external_id].product_id in products_by_id
+                    else None
+                ),
+                "location_external_id": s.location_external_id,
+                "location_name": location_names.get(s.location_external_id),
+                "quantity_on_hand": float(s.quantity_on_hand),
+                "quantity_available": float(s.quantity_available),
+                "quantity_reserved": float(s.quantity_reserved),
+                "quantity_in_transit": float(s.quantity_in_transit),
+                "last_updated": s.last_updated.isoformat(),
             }
             for s in items
         ],
@@ -1187,19 +1306,32 @@ def data_stock(limit: int = 50, tenant_id: int | None = None, db: Session = Depe
 @admin_router.get("/data/sales")
 def data_sales(limit: int = 50, tenant_id: int | None = None, db: Session = Depends(get_db)):
     tenant = _resolve_tenant(db, tenant_id)
-    stmt = select(SalesDocument).where(SalesDocument.tenant_id == tenant.id)
+    stmt = select(SalesOrder).where(SalesOrder.tenant_id == tenant.id)
     total = db.scalar(select(func.count()).select_from(stmt.subquery()))
-    items = db.scalars(stmt.order_by(SalesDocument.id.desc()).limit(limit)).all()
+    items = db.scalars(stmt.order_by(SalesOrder.id.desc()).limit(limit)).all()
+    location_ids = {item.location_external_id for item in items if item.location_external_id}
+    location_names = {
+        loc.external_id: loc.name
+        for loc in db.scalars(
+            select(Location).where(Location.tenant_id == tenant.id, Location.external_id.in_(location_ids))
+        ).all()
+    } if location_ids else {}
     return {
         "total": total,
         "items": [
             {
                 "id": d.id,
+                "source_system": d.source_system,
                 "external_id": d.external_id,
-                "branch_external_id": d.branch_external_id,
-                "issued_at": d.issued_at.isoformat(),
+                "location_external_id": d.location_external_id,
+                "location_name": location_names.get(d.location_external_id),
+                "order_date": d.order_date.isoformat(),
                 "total_amount": float(d.total_amount),
-                "customer_external_id": d.customer_external_id,
+                "currency": d.currency,
+                "channel": d.channel,
+                "status": d.status,
+                "customer_ref": d.customer_ref,
+                "line_count": len(d.lines),
             }
             for d in items
         ],

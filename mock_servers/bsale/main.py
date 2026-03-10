@@ -5,13 +5,14 @@ from mock_servers.bsale.data import (
     CLIENT_ATTRIBUTES,
     CLIENT_CONTACTS,
     CLIENTS,
-    COMPANY,
     DOCUMENT_TYPES,
     DOCUMENTS,
     OFFICES,
     PRODUCTS,
     PRODUCT_TAXES,
     PRODUCT_VARIANTS,
+    STOCK_CONSUMPTIONS,
+    STOCK_RECEPTIONS,
     STOCKS,
 )
 
@@ -180,6 +181,28 @@ def stocks(access_token: str | None = Header(default=None, convert_underscores=F
     return {"items": STOCKS, "count": len(STOCKS)}
 
 
+@app.get("/v1/stocks/receptions.json")
+def stock_receptions(
+    access_token: str | None = Header(default=None, convert_underscores=False),
+    limit: int = 25,
+    offset: int = 0,
+    expand: str | None = None,
+):
+    validate(access_token)
+    return page_items(STOCK_RECEPTIONS, limit=limit, offset=offset)
+
+
+@app.get("/v1/stocks/consumptions.json")
+def stock_consumptions(
+    access_token: str | None = Header(default=None, convert_underscores=False),
+    limit: int = 25,
+    offset: int = 0,
+    expand: str | None = None,
+):
+    validate(access_token)
+    return page_items(STOCK_CONSUMPTIONS, limit=limit, offset=offset)
+
+
 @app.get("/v1/offices.json")
 def offices(
     access_token: str | None = Header(default=None, convert_underscores=False),
@@ -252,12 +275,6 @@ def documents(
         result = [d for d in result if d.get("document_type", {}).get("id") == documenttypeid]
     page = result[offset:offset + limit]
     return {"items": page, "count": len(result)}
-
-
-@app.get("/v1/company.json")
-def company(access_token: str | None = Header(default=None, convert_underscores=False)):
-    validate(access_token)
-    return COMPANY
 
 
 @app.get("/health")

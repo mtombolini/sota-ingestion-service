@@ -6,28 +6,23 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import desc, select
+from sqlalchemy import delete, desc, select
 from sqlalchemy.orm import Session
 
 from app.models import (
-    Branch,
-    Client,
-    ClientAddress,
-    ClientAttribute,
-    ClientContact,
-    DocumentType,
     IntegrationConnection,
     IntegrationError,
     IntegrationJob,
     IntegrationJobRun,
     IntegrationOutboxEvent,
     IntegrationRawObject,
+    Location,
     Product,
-    ProductTax,
-    ProductVariant,
-    SalesDocument,
-    SalesDocumentLine,
-    StockSnapshot,
+    SalesOrder,
+    SalesOrderLine,
+    Stock,
+    StockMovement,
+    Variant,
 )
 from app.providers import provider_registry
 from app.secrets import get_secret_store
@@ -85,30 +80,31 @@ class IngestionService:
             connection = self.db.get(IntegrationConnection, job.connection_id)
             provider = provider_registry.get(connection.provider)
             connector = provider.build_runtime_connector(self.db, connection, secret_store=get_secret_store())
-            if job.job_type == "sync_product_catalog":
-                records = await provider.fetch_records(connector, job.job_type)
+
+            if job_type == "sync_product_catalog":
+                records = await provider.fetch_records(connector, job_type)
                 run.records_raw = len(records)
                 run.records_normalized = self._persist_products(tenant_id, run.id, records, provider=provider)
-            elif job_type == "sync_customers":
-                records = await provider.fetch_records(connector, job.job_type)
+            elif job_type == "sync_locations":
+                records = await provider.fetch_records(connector, job_type)
                 run.records_raw = len(records)
-                run.records_normalized = self._persist_clients(tenant_id, run.id, records, provider=provider)
-            elif job_type == "sync_document_types":
-                records = await provider.fetch_records(connector, job.job_type)
+                run.records_normalized = self._persist_locations(tenant_id, run.id, records, provider=provider)
+            elif job_type == "sync_stock":
+                records = await provider.fetch_records(connector, job_type)
                 run.records_raw = len(records)
-                run.records_normalized = self._persist_document_types(tenant_id, run.id, records, provider=provider)
-            elif job_type == "sync_stock_snapshot":
-                records = await provider.fetch_records(connector, job.job_type)
+                run.records_normalized = self._persist_inventory(tenant_id, run.id, records, provider=provider)
+            elif job_type == "sync_sales_orders":
+                records = await provider.fetch_records(connector, job_type)
                 run.records_raw = len(records)
-                run.records_normalized = self._persist_stock(tenant_id, run.id, records, provider=provider)
-            elif job_type == "sync_sales_documents":
-                records = await provider.fetch_records(connector, job.job_type)
+                run.records_normalized = self._persist_sales_orders(tenant_id, run.id, records, provider=provider)
+            elif job_type in ("sync_customers", "sync_document_types"):
+                # Raw-only jobs: data is stored as raw objects but has no canonical table.
+                records = await provider.fetch_records(connector, job_type)
                 run.records_raw = len(records)
-                run.records_normalized = self._persist_sales(tenant_id, run.id, records, provider=provider)
-            elif job_type == "sync_branches":
-                records = await provider.fetch_records(connector, job.job_type)
-                run.records_raw = len(records)
-                run.records_normalized = self._persist_branches(tenant_id, run.id, records, provider=provider)
+                for rec in records:
+                    self._persist_raw(tenant_id, run.id, provider.source_system(), provider.source_endpoint_for_job(job_type), rec)
+                self.db.commit()
+                run.records_normalized = 0
             else:
                 raise ValueError(f"unsupported job type {job_type}")
 
@@ -116,7 +112,6 @@ class IngestionService:
             run.finished_at = datetime.utcnow()
             self.db.commit()
         except Exception as exc:
-            # Reset session state after failed flush/commit before writing failure metadata.
             self.db.rollback()
             run = self.db.get(IntegrationJobRun, run_id)
             if run:
@@ -136,6 +131,10 @@ class IngestionService:
             )
             self.db.commit()
             logger.exception("job failed", extra={"run_id": run_id})
+
+    # ------------------------------------------------------------------
+    # Raw & outbox helpers
+    # ------------------------------------------------------------------
 
     def _persist_raw(self, tenant_id: int, run_id: int, source_system: str, endpoint: str, payload: dict[str, Any]) -> None:
         safe_payload = self._json_safe(payload)
@@ -176,13 +175,54 @@ class IngestionService:
             return float(value)
         return value
 
+    # ------------------------------------------------------------------
+    # FK resolution helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_product_id(self, tenant_id: int, source_system: str, external_id: str) -> int | None:
+        return self.db.scalar(
+            select(Product.id).where(
+                Product.tenant_id == tenant_id,
+                Product.source_system == source_system,
+                Product.external_id == external_id,
+            )
+        )
+
+    def _resolve_variant_id(self, tenant_id: int, source_system: str, external_id: str) -> int | None:
+        return self.db.scalar(
+            select(Variant.id).where(
+                Variant.tenant_id == tenant_id,
+                Variant.source_system == source_system,
+                Variant.external_id == external_id,
+            )
+        )
+
+    def _resolve_location_id(self, tenant_id: int, source_system: str, external_id: str) -> int | None:
+        return self.db.scalar(
+            select(Location.id).where(
+                Location.tenant_id == tenant_id,
+                Location.source_system == source_system,
+                Location.external_id == external_id,
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # Canonical persist methods
+    # ------------------------------------------------------------------
+
     def _persist_products(self, tenant_id: int, run_id: int, records: list[dict], *, provider) -> int:
+        source_system = provider.source_system()
         for rec in records:
-            self._persist_raw(tenant_id, run_id, provider.source_system(), provider.source_endpoint_for_job("sync_product_catalog"), rec)
+            self._persist_raw(tenant_id, run_id, source_system, provider.source_endpoint_for_job("sync_product_catalog"), rec)
             n = provider.normalize("sync_product_catalog", rec)
             variants = n.pop("variants", [])
-            product_taxes = n.pop("product_taxes", [])
-            existing = self.db.scalar(select(Product).where(Product.tenant_id == tenant_id, Product.external_id == n["external_id"]))
+            existing = self.db.scalar(
+                select(Product).where(
+                    Product.tenant_id == tenant_id,
+                    Product.source_system == source_system,
+                    Product.external_id == n["external_id"],
+                )
+            )
             if existing:
                 for k, v in n.items():
                     setattr(existing, k, v)
@@ -192,141 +232,204 @@ class IngestionService:
                 self.db.add(product)
                 self.db.flush()
 
-            product.variants.clear()
-            for variant in variants:
-                product.variants.append(ProductVariant(tenant_id=tenant_id, **variant))
-
-            product.product_taxes.clear()
-            for product_tax in product_taxes:
-                product.product_taxes.append(ProductTax(tenant_id=tenant_id, **product_tax))
-
-            outbox_payload = {**n, "variants": variants, "product_taxes": product_taxes}
-            self._emit_outbox(tenant_id, "product.upserted", "product", n["external_id"], outbox_payload)
+            for variant_payload in variants:
+                variant_payload["product_id"] = product.id
+                existing_variant = self.db.scalar(
+                    select(Variant).where(
+                        Variant.tenant_id == tenant_id,
+                        Variant.source_system == source_system,
+                        Variant.external_id == variant_payload["external_id"],
+                    )
+                )
+                if existing_variant:
+                    for k, v in variant_payload.items():
+                        setattr(existing_variant, k, v)
+                else:
+                    self.db.add(Variant(tenant_id=tenant_id, **variant_payload))
+            self._emit_outbox(tenant_id, "product.upserted", "product", n["external_id"], n)
         self.db.commit()
         return len(records)
 
-    def _persist_clients(self, tenant_id: int, run_id: int, records: list[dict], *, provider) -> int:
+    def _persist_locations(self, tenant_id: int, run_id: int, records: list[dict], *, provider) -> int:
+        source_system = provider.source_system()
         for rec in records:
-            self._persist_raw(tenant_id, run_id, provider.source_system(), provider.source_endpoint_for_job("sync_customers"), rec)
-            n = provider.normalize("sync_customers", rec)
-            contacts = n.pop("contacts", [])
-            addresses = n.pop("addresses", [])
-            attributes = n.pop("attributes", [])
-            existing = self.db.scalar(select(Client).where(Client.tenant_id == tenant_id, Client.external_id == n["external_id"]))
-            if existing:
-                for k, v in n.items():
-                    setattr(existing, k, v)
-                client = existing
-            else:
-                client = Client(tenant_id=tenant_id, **n)
-                self.db.add(client)
-                self.db.flush()
-
-            client.contacts.clear()
-            for contact in contacts:
-                client.contacts.append(ClientContact(tenant_id=tenant_id, **contact))
-
-            client.addresses.clear()
-            for address in addresses:
-                client.addresses.append(ClientAddress(tenant_id=tenant_id, **address))
-
-            client.attributes.clear()
-            for attribute in attributes:
-                client.attributes.append(ClientAttribute(tenant_id=tenant_id, **attribute))
-
-            outbox_payload = {**n, "contacts": contacts, "addresses": addresses, "attributes": attributes}
-            self._emit_outbox(tenant_id, "client.upserted", "client", n["external_id"], outbox_payload)
-        self.db.commit()
-        return len(records)
-
-    def _resolve_sales_line_products(self, tenant_id: int, lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        variant_ids = [line.get("variant_external_id") for line in lines if line.get("variant_external_id")]
-        if not variant_ids:
-            return lines
-
-        rows = self.db.execute(
-            select(ProductVariant.external_id, Product.external_id)
-            .join(Product, Product.id == ProductVariant.product_id)
-            .where(ProductVariant.tenant_id == tenant_id, ProductVariant.external_id.in_(variant_ids))
-        ).all()
-        product_by_variant = {str(variant_external_id): str(product_external_id) for variant_external_id, product_external_id in rows}
-
-        resolved_lines: list[dict[str, Any]] = []
-        for line in lines:
-            resolved = dict(line)
-            variant_id = line.get("variant_external_id")
-            if variant_id and variant_id in product_by_variant:
-                resolved["product_external_id"] = product_by_variant[variant_id]
-            resolved_lines.append(resolved)
-        return resolved_lines
-
-    def _persist_branches(self, tenant_id: int, run_id: int, records: list[dict], *, provider) -> int:
-        for rec in records:
-            self._persist_raw(tenant_id, run_id, provider.source_system(), provider.source_endpoint_for_job("sync_branches"), rec)
-            n = provider.normalize("sync_branches", rec)
-            existing = self.db.scalar(select(Branch).where(Branch.tenant_id == tenant_id, Branch.external_id == n["external_id"]))
-            if existing:
-                for k, v in n.items():
-                    setattr(existing, k, v)
-            else:
-                self.db.add(Branch(tenant_id=tenant_id, **n))
-            self._emit_outbox(tenant_id, "branch.upserted", "branch", n["external_id"], n)
-        self.db.commit()
-        return len(records)
-
-    def _persist_document_types(self, tenant_id: int, run_id: int, records: list[dict], *, provider) -> int:
-        for rec in records:
-            self._persist_raw(
-                tenant_id,
-                run_id,
-                provider.source_system(),
-                provider.source_endpoint_for_job("sync_document_types"),
-                rec,
-            )
-            n = provider.normalize("sync_document_types", rec)
+            self._persist_raw(tenant_id, run_id, source_system, provider.source_endpoint_for_job("sync_locations"), rec)
+            n = provider.normalize("sync_locations", rec)
             existing = self.db.scalar(
-                select(DocumentType).where(DocumentType.tenant_id == tenant_id, DocumentType.external_id == n["external_id"])
+                select(Location).where(
+                    Location.tenant_id == tenant_id,
+                    Location.source_system == source_system,
+                    Location.external_id == n["external_id"],
+                )
             )
             if existing:
                 for k, v in n.items():
                     setattr(existing, k, v)
             else:
-                self.db.add(DocumentType(tenant_id=tenant_id, **n))
-            self._emit_outbox(tenant_id, "document_type.upserted", "document_type", n["external_id"], n)
+                self.db.add(Location(tenant_id=tenant_id, **n))
+            self._emit_outbox(tenant_id, "location.upserted", "location", n["external_id"], n)
         self.db.commit()
         return len(records)
 
     def _persist_stock(self, tenant_id: int, run_id: int, records: list[dict], *, provider) -> int:
+        source_system = provider.source_system()
         for rec in records:
-            self._persist_raw(tenant_id, run_id, provider.source_system(), provider.source_endpoint_for_job("sync_stock_snapshot"), rec)
-            n = provider.normalize("sync_stock_snapshot", rec)
-            self.db.add(StockSnapshot(tenant_id=tenant_id, **n))
-            self._emit_outbox(tenant_id, "stock.snapshot", "stock_snapshot", f"{n['product_external_id']}:{n['branch_external_id']}", n)
+            clean_rec = {k: v for k, v in rec.items() if not k.startswith("_")}
+            self._persist_raw(tenant_id, run_id, source_system, provider.source_endpoint_for_job("sync_stock"), clean_rec)
+            n = provider.normalize("sync_stock", rec)
+
+            # Try to resolve FKs to canonical Variant and Location
+            n["variant_id"] = self._resolve_variant_id(tenant_id, source_system, n["variant_external_id"])
+            n["location_id"] = self._resolve_location_id(tenant_id, source_system, n["location_external_id"])
+
+            existing = self.db.scalar(
+                select(Stock).where(
+                    Stock.tenant_id == tenant_id,
+                    Stock.source_system == source_system,
+                    Stock.variant_external_id == n["variant_external_id"],
+                    Stock.location_external_id == n["location_external_id"],
+                )
+            )
+            if existing:
+                for k, v in n.items():
+                    setattr(existing, k, v)
+            else:
+                self.db.add(Stock(tenant_id=tenant_id, **n))
+
+            self._emit_outbox(
+                tenant_id, "stock.updated", "stock",
+                f"{n['variant_external_id']}:{n['location_external_id']}", n,
+            )
         self.db.commit()
         return len(records)
 
-    def _persist_sales(self, tenant_id: int, run_id: int, records: list[dict], *, provider) -> int:
-        doc_fields = (
-            "external_id", "document_type_id", "number", "branch_external_id",
-            "issued_at", "customer_external_id", "net_amount", "tax_amount",
-            "exempt_amount", "total_amount", "state",
-        )
+    def _persist_stock_movements(self, tenant_id: int, run_id: int, records: list[dict], *, provider, endpoint: str, job_type: str) -> int:
+        source_system = provider.source_system()
+        movement_count = 0
         for rec in records:
-            self._persist_raw(tenant_id, run_id, provider.source_system(), provider.source_endpoint_for_job("sync_sales_documents"), rec)
-            n = provider.normalize("sync_sales_documents", rec)
-            n["lines"] = self._resolve_sales_line_products(tenant_id, n["lines"])
-            existing = self.db.scalar(select(SalesDocument).where(SalesDocument.tenant_id == tenant_id, SalesDocument.external_id == n["external_id"]))
-            if existing:
-                for field in doc_fields:
-                    if field in n:
-                        setattr(existing, field, n[field])
-                existing.lines.clear()
-                for line in n["lines"]:
-                    existing.lines.append(SalesDocumentLine(**line))
+            clean_rec = {k: v for k, v in rec.items() if not k.startswith("_")}
+            self._persist_raw(tenant_id, run_id, source_system, endpoint, clean_rec)
+            normalized = provider.normalize(job_type, rec)
+            for movement in normalized.get("movements", []):
+                movement["variant_id"] = self._resolve_variant_id(tenant_id, source_system, movement["variant_external_id"])
+                location_ext = movement.get("location_external_id")
+                movement["location_id"] = (
+                    self._resolve_location_id(tenant_id, source_system, location_ext) if location_ext else None
+                )
+
+                existing = self.db.scalar(
+                    select(StockMovement).where(
+                        StockMovement.tenant_id == tenant_id,
+                        StockMovement.source_system == source_system,
+                        StockMovement.external_id == movement["external_id"],
+                    )
+                )
+                if existing:
+                    for k, v in movement.items():
+                        setattr(existing, k, v)
+                else:
+                    self.db.add(StockMovement(tenant_id=tenant_id, **movement))
+                movement_count += 1
+        self.db.commit()
+        return movement_count
+
+    def _persist_inventory(self, tenant_id: int, run_id: int, records: list[dict], *, provider) -> int:
+        snapshots: list[dict] = []
+        movement_records_by_endpoint: dict[str, list[dict]] = {}
+
+        for rec in records:
+            record_type = rec.get("_stock_record_type")
+            if record_type == "snapshot":
+                snapshots.append(rec)
+            elif record_type in {"reception", "consumption"}:
+                endpoint = rec.get("_source_endpoint") or provider.source_endpoint_for_job("sync_stock")
+                movement_records_by_endpoint.setdefault(endpoint, []).append(rec)
             else:
-                doc = SalesDocument(tenant_id=tenant_id, **{k: v for k, v in n.items() if k != "lines"})
-                doc.lines = [SalesDocumentLine(**line) for line in n["lines"]]
-                self.db.add(doc)
-            self._emit_outbox(tenant_id, "sales_document.upserted", "sales_document", n["external_id"], n)
+                raise ValueError("unsupported stock record type")
+
+        normalized_count = 0
+        if snapshots:
+            normalized_count += self._persist_stock(tenant_id, run_id, snapshots, provider=provider)
+        for endpoint, movement_records in movement_records_by_endpoint.items():
+            normalized_count += self._persist_stock_movements(
+                tenant_id,
+                run_id,
+                movement_records,
+                provider=provider,
+                endpoint=endpoint,
+                job_type="sync_stock",
+            )
+        return normalized_count
+
+    def _persist_sales_orders(self, tenant_id: int, run_id: int, records: list[dict], *, provider) -> int:
+        source_system = provider.source_system()
+        for rec in records:
+            self._persist_raw(tenant_id, run_id, source_system, provider.source_endpoint_for_job("sync_sales_orders"), rec)
+            n = provider.normalize("sync_sales_orders", rec)
+            lines = n.pop("lines", [])
+
+            # Resolve location FK
+            location_ext_id = n.pop("location_external_id", None)
+            n["location_external_id"] = location_ext_id
+            n["location_id"] = self._resolve_location_id(tenant_id, source_system, location_ext_id) if location_ext_id else None
+
+            existing = self.db.scalar(
+                select(SalesOrder).where(
+                    SalesOrder.tenant_id == tenant_id,
+                    SalesOrder.source_system == source_system,
+                    SalesOrder.external_id == n["external_id"],
+                )
+            )
+
+            if existing:
+                for k, v in n.items():
+                    setattr(existing, k, v)
+                existing.lines.clear()
+                for line in lines:
+                    line["variant_id"] = self._resolve_variant_id(tenant_id, source_system, line["variant_external_id"])
+                    existing.lines.append(SalesOrderLine(**line))
+                order = existing
+            else:
+                order = SalesOrder(tenant_id=tenant_id, **n)
+                for line in lines:
+                    line["variant_id"] = self._resolve_variant_id(tenant_id, source_system, line["variant_external_id"])
+                    order.lines.append(SalesOrderLine(**line))
+                self.db.add(order)
+                self.db.flush()
+
+            self._replace_sales_order_movements(tenant_id, source_system, order)
+
+            outbox_payload = {**n, "lines": lines}
+            self._emit_outbox(tenant_id, "sales_order.upserted", "sales_order", n["external_id"], outbox_payload)
         self.db.commit()
         return len(records)
+
+    def _replace_sales_order_movements(self, tenant_id: int, source_system: str, order: SalesOrder) -> None:
+        self.db.execute(
+            delete(StockMovement).where(
+                StockMovement.tenant_id == tenant_id,
+                StockMovement.source_system == source_system,
+                StockMovement.reference_type == "SALES_ORDER",
+                StockMovement.reference_id == order.external_id,
+            )
+        )
+        if order.status == "CANCELLED":
+            return
+        for idx, line in enumerate(order.lines, start=1):
+            self.db.add(
+                StockMovement(
+                    tenant_id=tenant_id,
+                    source_system=source_system,
+                    external_id=f"sales-order:{order.external_id}:{idx}",
+                    variant_id=line.variant_id,
+                    location_id=order.location_id,
+                    variant_external_id=line.variant_external_id,
+                    location_external_id=order.location_external_id,
+                    movement_type="SALE_OUT",
+                    quantity=Decimal(str(line.quantity)) * Decimal("-1"),
+                    reference_type="SALES_ORDER",
+                    reference_id=order.external_id,
+                    movement_date=order.order_date,
+                    unit_cost=None,
+                )
+            )

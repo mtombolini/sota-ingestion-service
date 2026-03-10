@@ -10,17 +10,18 @@ from app.connectors.bsale import (
     attempt_bsale_connection,
     build_bsale_config,
     build_bsale_job_connector,
+    normalize_bsale_base_url,
     probe_bsale_connection,
     resolve_mock_base_url,
     resolve_real_base_url,
 )
 from app.models import IntegrationConnection
 from app.normalizers.bsale import (
-    normalize_branch,
-    normalize_client,
-    normalize_document_type,
+    normalize_location,
     normalize_product,
-    normalize_sales_document,
+    normalize_stock_consumption,
+    normalize_stock_reception,
+    normalize_sales_order,
     normalize_stock,
 )
 from app.providers.base import ProviderCheckResult, ProviderDefinition, ProviderJobDefinition
@@ -33,37 +34,37 @@ class BsaleProvider(ProviderDefinition):
     description = "Conector de catalogo, clientes, tipos de documento, stock, ventas y sucursales via API Bsale."
     environments = ("mock", "production")
     default_environment = "production"
-    docs_url = "https://api.bsale.cl"
+    docs_url = "https://docs.bsale.dev"
     _jobs = (
         ProviderJobDefinition(
             job_type="sync_product_catalog",
             label="Catalogo",
-            description="Trae productos, variantes e impuestos asociados y normaliza el catalogo canonico.",
+            description="Trae productos desde Bsale y los normaliza al modelo canonico Product.",
+        ),
+        ProviderJobDefinition(
+            job_type="sync_locations",
+            label="Ubicaciones",
+            description="Sincroniza sucursales/oficinas de Bsale como Locations canonicas.",
+        ),
+        ProviderJobDefinition(
+            job_type="sync_stock",
+            label="Stock",
+            description="Sincroniza inventario de Bsale: snapshot actual y movimientos historicos de stock.",
+        ),
+        ProviderJobDefinition(
+            job_type="sync_sales_orders",
+            label="Ventas",
+            description="Importa documentos de venta como SalesOrders canonicos con lineas de detalle.",
         ),
         ProviderJobDefinition(
             job_type="sync_customers",
-            label="Clientes",
-            description="Trae clientes con contactos, direcciones y atributos asociados.",
+            label="Clientes (raw)",
+            description="Trae clientes desde Bsale. Se almacenan solo como raw (sin tabla canonica).",
         ),
         ProviderJobDefinition(
             job_type="sync_document_types",
-            label="Tipos de documento",
-            description="Sincroniza tipos de documento configurados en Bsale para referencias y validaciones.",
-        ),
-        ProviderJobDefinition(
-            job_type="sync_stock_snapshot",
-            label="Stock",
-            description="Captura snapshot de stock por producto y sucursal.",
-        ),
-        ProviderJobDefinition(
-            job_type="sync_sales_documents",
-            label="Documentos",
-            description="Importa documentos (boletas, facturas, NC) con detalles, montos neto/iva y tipo.",
-        ),
-        ProviderJobDefinition(
-            job_type="sync_branches",
-            label="Sucursales",
-            description="Sincroniza oficinas o sucursales del proveedor.",
+            label="Tipos de documento (raw)",
+            description="Sincroniza tipos de documento de Bsale. Se almacenan solo como raw (sin tabla canonica).",
         ),
     )
 
@@ -113,7 +114,7 @@ class BsaleProvider(ProviderDefinition):
             )
 
         if requested_mode == ConnectorMode.MOCK:
-            conn.base_url = self._clean_base_url(payload.get("base_url")) or self.default_base_url(mode=ConnectorMode.MOCK)
+            conn.base_url = normalize_bsale_base_url(mode=ConnectorMode.MOCK, value=payload.get("base_url")) or self.default_base_url(mode=ConnectorMode.MOCK)
             conn.status = ConnectionStatus.MOCK.value
             conn.last_checked_at = None
             conn.last_check_ok = None
@@ -121,9 +122,11 @@ class BsaleProvider(ProviderDefinition):
             return conn.last_check_message
 
         if payload.get("base_url") is not None:
-            conn.base_url = self._clean_base_url(payload.get("base_url")) or ""
+            conn.base_url = normalize_bsale_base_url(mode=ConnectorMode.REAL, value=payload.get("base_url")) or ""
         elif not conn.base_url or "mock-bsale-api" in conn.base_url:
             conn.base_url = self.default_base_url(mode=ConnectorMode.REAL)
+        else:
+            conn.base_url = normalize_bsale_base_url(mode=ConnectorMode.REAL, value=conn.base_url) or conn.base_url
 
         conn.status = self._status_for_saved_config(conn.base_url, secret_store.resolve(db, conn.secret_ref)).value
         conn.last_checked_at = None
@@ -170,6 +173,7 @@ class BsaleProvider(ProviderDefinition):
                 api_key=api_key,
                 current=ConnectorConfig(name=conn.provider, mode=mode, base_url=conn.base_url, api_key=api_key),
             )
+            conn.base_url = config.base_url
         except ConnectorConfigurationError as exc:
             message = str(exc)
             conn.status = ConnectionStatus.CONFIG_INCOMPLETE.value
@@ -209,26 +213,30 @@ class BsaleProvider(ProviderDefinition):
     def normalize(self, job_type: str, payload: dict[str, Any]) -> dict[str, Any]:
         if job_type == "sync_product_catalog":
             return normalize_product(payload)
-        if job_type == "sync_customers":
-            return normalize_client(payload)
-        if job_type == "sync_document_types":
-            return normalize_document_type(payload)
-        if job_type == "sync_stock_snapshot":
-            return normalize_stock(payload)
-        if job_type == "sync_sales_documents":
-            return normalize_sales_document(payload)
-        if job_type == "sync_branches":
-            return normalize_branch(payload)
-        raise ValueError(f"unsupported job type {job_type}")
+        if job_type == "sync_locations":
+            return normalize_location(payload)
+        if job_type == "sync_stock":
+            stock_record_type = payload.get("_stock_record_type") or "snapshot"
+            if stock_record_type == "snapshot":
+                return normalize_stock(payload)
+            if stock_record_type == "reception":
+                return normalize_stock_reception(payload)
+            if stock_record_type == "consumption":
+                return normalize_stock_consumption(payload)
+            raise ValueError("unsupported stock record type")
+        if job_type == "sync_sales_orders":
+            return normalize_sales_order(payload)
+        # sync_customers and sync_document_types are raw-only; no canonical normalization.
+        raise ValueError(f"unsupported or raw-only job type {job_type}")
 
     def source_endpoint_for_job(self, job_type: str) -> str:
         return {
             "sync_product_catalog": "products.json",
+            "sync_locations": "offices.json",
+            "sync_stock": "stocks.json",
+            "sync_sales_orders": "documents.json",
             "sync_customers": "clients.json",
             "sync_document_types": "document_types.json",
-            "sync_stock_snapshot": "stocks.json",
-            "sync_sales_documents": "documents.json",
-            "sync_branches": "offices.json",
         }[job_type]
 
     @staticmethod

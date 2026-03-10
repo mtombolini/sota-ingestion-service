@@ -1,10 +1,20 @@
+import os
+
 from sqlalchemy import select
 
 from app.core.database import SessionLocal
 from app.models import IntegrationConnection, IntegrationJob, IntegrationMapping, Tenant
 
 
+def _seed_enabled() -> bool:
+    return os.getenv("SEED_DEMO_DATA", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def main():
+    if not _seed_enabled():
+        print("seed skipped (SEED_DEMO_DATA disabled)")
+        return
+
     db = SessionLocal()
     try:
         tenant = db.scalar(select(Tenant).where(Tenant.slug == "demo-retail"))
@@ -41,13 +51,20 @@ def main():
             if getattr(conn, "is_primary", None) is None:
                 conn.is_primary = True
 
-        job_types = ["sync_product_catalog", "sync_customers", "sync_document_types", "sync_stock_snapshot", "sync_sales_documents", "sync_branches"]
+        job_types = [
+            "sync_product_catalog",
+            "sync_locations",
+            "sync_stock",
+            "sync_sales_orders",
+            "sync_customers",
+            "sync_document_types",
+        ]
         existing = {j.job_type for j in db.scalars(select(IntegrationJob).where(IntegrationJob.tenant_id == tenant.id)).all()}
         for jt in job_types:
             if jt not in existing:
                 db.add(IntegrationJob(tenant_id=tenant.id, connection_id=conn.id, job_type=jt, schedule=None))
 
-        for obj in ["products", "clients", "document_types", "stocks", "sales_documents", "branches"]:
+        for obj in ["products", "variants", "locations", "stock", "stock_movements", "sales_orders", "customers", "document_types"]:
             m = db.scalar(select(IntegrationMapping).where(IntegrationMapping.tenant_id == tenant.id, IntegrationMapping.object_name == obj))
             if not m:
                 db.add(IntegrationMapping(tenant_id=tenant.id, provider="bsale", object_name=obj, version="v1", mapping_payload={"strategy": "static-approved", "notes": "onboarding mapping"}))

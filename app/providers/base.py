@@ -88,14 +88,14 @@ class ProviderDefinition(ABC):
     async def fetch_records(self, connector: BaseConnector, job_type: str) -> list[dict[str, Any]]:
         if job_type == "sync_product_catalog":
             return await connector.fetch_products()
+        if job_type == "sync_locations":
+            return await connector.fetch_branches()
+        if job_type == "sync_stock":
+            return await connector.fetch_stock()
+        if job_type == "sync_sales_orders":
+            return await connector.fetch_sales_documents()
         if job_type == "sync_customers":
             return await connector.fetch_clients()
         if job_type == "sync_document_types":
             return await connector.fetch_document_types()
-        if job_type == "sync_stock_snapshot":
-            return await connector.fetch_stock()
-        if job_type == "sync_sales_documents":
-            return await connector.fetch_sales_documents()
-        if job_type == "sync_branches":
-            return await connector.fetch_branches()
         raise ValueError(f"unsupported job type {job_type}")

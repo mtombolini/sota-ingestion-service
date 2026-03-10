@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -11,7 +12,7 @@ from app.core.config import get_settings
 from .base import BaseConnector, ConnectorConfig, ConnectorConfigurationError, ConnectorMode
 
 DEFAULT_MOCK_BASE_URL = "http://mock-bsale-api:8010/v1"
-DEFAULT_REAL_BASE_URL = "https://api.bsale.cl/v1"
+DEFAULT_REAL_BASE_URL = "https://api.bsale.io/v1"
 DEFAULT_MOCK_API_TOKEN = "mock-token"
 
 
@@ -73,6 +74,51 @@ class BsaleConnector(BaseConnector):
             offset += len(items)
         return collected
 
+    @staticmethod
+    def _endpoint_from_href(href: str | None) -> str | None:
+        if not href:
+            return None
+        path = urlparse(href).path or href
+        if "/v1/" in path:
+            return path.split("/v1/", 1)[1].lstrip("/")
+        return path.lstrip("/")
+
+    async def _ensure_detail_items(
+        self,
+        records: list[dict[str, Any]],
+        *,
+        client: httpx.AsyncClient,
+    ) -> list[dict[str, Any]]:
+        enriched: list[dict[str, Any]] = []
+        for record in records:
+            details = record.get("details")
+            if isinstance(details, dict) and details.get("items") is not None:
+                enriched.append(record)
+                continue
+
+            endpoint = None
+            if isinstance(details, dict):
+                endpoint = self._endpoint_from_href(details.get("href"))
+            elif isinstance(details, str):
+                endpoint = self._endpoint_from_href(details)
+
+            if not endpoint:
+                enriched.append(record)
+                continue
+
+            detail_items = await self._fetch_items(endpoint, client=client)
+            enriched.append(
+                {
+                    **record,
+                    "details": {
+                        **(details if isinstance(details, dict) else {}),
+                        "items": detail_items,
+                        "count": len(detail_items),
+                    },
+                }
+            )
+        return enriched
+
     async def fetch_products(self) -> list[dict[str, Any]]:
         async with httpx.AsyncClient(timeout=self.timeout_s) as client:
             products = await self._fetch_paginated("products.json", client=client)
@@ -122,10 +168,40 @@ class BsaleConnector(BaseConnector):
             return enriched_clients
 
     async def fetch_stock(self) -> list[dict[str, Any]]:
-        return await self._fetch_paginated("stocks.json")
+        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+            snapshot, receptions, consumptions = await asyncio.gather(
+                self._fetch_paginated("stocks.json", client=client),
+                self._fetch_paginated("stocks/receptions.json", params={"expand": "details"}, client=client),
+                self._fetch_paginated("stocks/consumptions.json", params={"expand": "details"}, client=client),
+            )
+            receptions, consumptions = await asyncio.gather(
+                self._ensure_detail_items(receptions, client=client),
+                self._ensure_detail_items(consumptions, client=client),
+            )
+        return [
+            *[{**record, "_stock_record_type": "snapshot", "_source_endpoint": "stocks.json"} for record in snapshot],
+            *[
+                {**record, "_stock_record_type": "reception", "_source_endpoint": "stocks/receptions.json"}
+                for record in receptions
+            ],
+            *[
+                {**record, "_stock_record_type": "consumption", "_source_endpoint": "stocks/consumptions.json"}
+                for record in consumptions
+            ],
+        ]
+
+    async def fetch_stock_receptions(self) -> list[dict[str, Any]]:
+        return await self._fetch_paginated("stocks/receptions.json", params={"expand": "details"})
+
+    async def fetch_stock_consumptions(self) -> list[dict[str, Any]]:
+        return await self._fetch_paginated("stocks/consumptions.json", params={"expand": "details"})
 
     async def fetch_sales_documents(self) -> list[dict[str, Any]]:
-        return await self._fetch_paginated("documents.json", params={"expand": "details", "state": "0"})
+        async with httpx.AsyncClient(timeout=self.timeout_s) as client:
+            documents = await self._fetch_paginated("documents.json", params={"expand": "details", "state": "0"}, client=client)
+            if not documents:
+                documents = await self._fetch_paginated("documents.json", params={"expand": "details"}, client=client)
+            return await self._ensure_detail_items(documents, client=client)
 
     async def fetch_branches(self) -> list[dict[str, Any]]:
         return await self._fetch_paginated("offices.json")
@@ -145,6 +221,37 @@ def _clean(value: str | None) -> str | None:
 def _normalize_base_url(value: str | None) -> str | None:
     candidate = _clean(value)
     return candidate.rstrip("/") if candidate else None
+
+
+def _sanitize_real_base_url(value: str | None) -> str | None:
+    candidate = _normalize_base_url(value)
+    if not candidate:
+        return None
+
+    lowered = candidate.lower()
+    if lowered in {"https://api.bsale.cl", "http://api.bsale.cl", "https://api.bsale.cl/v1", "http://api.bsale.cl/v1"}:
+        return DEFAULT_REAL_BASE_URL
+    if lowered in {"https://api.bsale.io", "http://api.bsale.io"}:
+        return DEFAULT_REAL_BASE_URL
+
+    if lowered.startswith("https://api.bsale.cl/") or lowered.startswith("http://api.bsale.cl/"):
+        suffix = candidate.split("api.bsale.cl", 1)[1]
+        candidate = "https://api.bsale.io" + suffix
+        lowered = candidate.lower()
+
+    if lowered.startswith("https://api.bsale.io/") or lowered.startswith("http://api.bsale.io/"):
+        if lowered == "https://api.bsale.io/v1" or lowered == "http://api.bsale.io/v1":
+            return DEFAULT_REAL_BASE_URL
+        if "/v1/" not in lowered and not lowered.endswith("/v1"):
+            return candidate + "/v1"
+
+    return candidate
+
+
+def normalize_bsale_base_url(*, mode: ConnectorMode, value: str | None) -> str | None:
+    if mode == ConnectorMode.MOCK:
+        return _normalize_base_url(value)
+    return _sanitize_real_base_url(value)
 
 
 
@@ -175,7 +282,7 @@ def resolve_mock_base_url() -> str:
 
 def resolve_real_base_url() -> str:
     settings = get_settings()
-    configured = _normalize_base_url(settings.bsale_base_url)
+    configured = _sanitize_real_base_url(settings.bsale_base_url)
     if configured and not _looks_like_mock_url(configured):
         return configured
     return DEFAULT_REAL_BASE_URL
@@ -206,11 +313,11 @@ def build_bsale_config(
             current,
             name="bsale",
             mode=ConnectorMode.MOCK,
-            base_url=_normalize_base_url(base_url) or resolve_mock_base_url(),
+            base_url=normalize_bsale_base_url(mode=ConnectorMode.MOCK, value=base_url) or resolve_mock_base_url(),
             api_key=None,
         )
 
-    current_base_url = _normalize_base_url(current.base_url)
+    current_base_url = normalize_bsale_base_url(mode=ConnectorMode.REAL, value=current.base_url)
     current_api_key = _clean(current.api_key)
     if _is_mock_token(current_api_key):
         current_api_key = None
@@ -219,7 +326,7 @@ def build_bsale_config(
         current,
         name="bsale",
         mode=ConnectorMode.REAL,
-        base_url=_normalize_base_url(base_url) or current_base_url or resolve_real_base_url(),
+        base_url=normalize_bsale_base_url(mode=ConnectorMode.REAL, value=base_url) or current_base_url or resolve_real_base_url(),
         api_key=_clean(api_key) or current_api_key or resolve_real_api_key(),
     )
 
@@ -248,41 +355,33 @@ def probe_bsale_connection(
         raise ConnectorConfigurationError("Falta configuracion para modo real de Bsale: api_key")
 
     base_url = config.base_url.rstrip("/")
-    url = base_url + "/company.json"
     headers = {"access_token": config.api_key}
 
     try:
         with httpx.Client(timeout=timeout_s, follow_redirects=True) as client:
-            response = client.get(url, headers=headers)
-            if response.is_success:
+            products_url = base_url + "/products.json"
+            products_response = client.get(products_url, headers=headers, params={"limit": 1, "offset": 0})
+            if products_response.is_success:
                 try:
-                    payload = response.json()
+                    payload = products_response.json()
                 except ValueError:
                     payload = None
                 try:
-                    products_response = client.get(base_url + "/products.json", headers=headers, params={"limit": 1, "offset": 0})
+                    clients_url = base_url + "/clients.json"
+                    clients_response = client.get(clients_url, headers=headers, params={"limit": 1, "offset": 0})
                 except httpx.HTTPError as exc:
-                    return False, f"Conexion base OK en {url}, pero fallo lectura de productos: {exc}", payload
-                if not products_response.is_success:
-                    detail = " ".join(products_response.text.split())[:200] or "sin detalle"
-                    return False, (
-                        f"Conexion base OK en {url}, pero products.json respondio HTTP {products_response.status_code}: {detail}"
-                    ), payload
-                try:
-                    clients_response = client.get(base_url + "/clients.json", headers=headers, params={"limit": 1, "offset": 0})
-                except httpx.HTTPError as exc:
-                    return False, f"Conexion base OK en {url}, pero fallo lectura de clientes: {exc}", payload
+                    return False, f"Lectura OK de products.json en {products_url}, pero fallo lectura de clientes: {exc}", payload
                 if not clients_response.is_success:
                     detail = " ".join(clients_response.text.split())[:200] or "sin detalle"
                     return False, (
-                        f"Conexion base OK en {url}, pero clients.json respondio HTTP {clients_response.status_code}: {detail}"
+                        f"Lectura OK de products.json en {products_url}, pero clients.json respondio HTTP {clients_response.status_code}: {detail}"
                     ), payload
-                return True, f"Conexion exitosa a {url} y lectura OK de products.json y clients.json.", payload
+                return True, f"Conexion exitosa a {base_url}; lectura OK de products.json y clients.json.", payload
     except httpx.HTTPError as exc:
-        return False, f"No fue posible conectar a Bsale ({url}): {exc}", None
+        return False, f"No fue posible conectar a Bsale ({products_url}): {exc}", None
 
-    detail = " ".join(response.text.split())[:200] or "sin detalle"
-    return False, f"Bsale respondio HTTP {response.status_code} al consultar {url}: {detail}", None
+    detail = " ".join(products_response.text.split())[:200] or "sin detalle"
+    return False, f"Bsale respondio HTTP {products_response.status_code} al consultar {products_url}: {detail}", None
 
 
 def attempt_bsale_connection(config: ConnectorConfig, timeout_s: float = 3.0) -> tuple[bool, str]:
@@ -295,13 +394,15 @@ def build_bsale_job_connector(*, mode: str | ConnectorMode, base_url: str, api_k
     connector_mode = mode if isinstance(mode, ConnectorMode) else ConnectorMode(mode)
 
     if connector_mode == ConnectorMode.MOCK:
-        return BsaleConnector(base_url=base_url.rstrip("/"), token=DEFAULT_MOCK_API_TOKEN)
+        normalized_base_url = normalize_bsale_base_url(mode=ConnectorMode.MOCK, value=base_url) or resolve_mock_base_url()
+        return BsaleConnector(base_url=normalized_base_url.rstrip("/"), token=DEFAULT_MOCK_API_TOKEN)
 
     normalized_api_key = _clean(api_key)
     if not normalized_api_key:
         raise ConnectorConfigurationError("Falta configuracion para modo real de Bsale: api_key")
 
-    return BsaleConnector(base_url=base_url.rstrip("/"), token=normalized_api_key)
+    normalized_base_url = normalize_bsale_base_url(mode=ConnectorMode.REAL, value=base_url) or resolve_real_base_url()
+    return BsaleConnector(base_url=normalized_base_url.rstrip("/"), token=normalized_api_key)
 
 
 class BsaleConnectorState:

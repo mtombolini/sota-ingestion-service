@@ -62,6 +62,21 @@ def test_mock_offices_contract():
     assert count.json()["count"] >= 1
 
 
+def test_mock_stock_endpoints_contract():
+    client = TestClient(app)
+
+    stocks = client.get('/v1/stocks.json', headers={"access_token": "x"})
+    receptions = client.get('/v1/stocks/receptions.json?limit=1&offset=0', headers={"access_token": "x"})
+    consumptions = client.get('/v1/stocks/consumptions.json?limit=1&offset=0', headers={"access_token": "x"})
+
+    assert stocks.status_code == 200
+    assert receptions.status_code == 200
+    assert consumptions.status_code == 200
+    assert stocks.json()["items"][0]["variantid"] == 201
+    assert receptions.json()["items"][0]["details"]["items"][0]["variant"]["id"] == "201"
+    assert consumptions.json()["items"][0]["details"]["items"][0]["variant"]["id"] == "203"
+
+
 def test_mock_document_types_contract():
     client = TestClient(app)
 
