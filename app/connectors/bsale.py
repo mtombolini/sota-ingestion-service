@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from dataclasses import replace
 from typing import Any
 from urllib.parse import urlparse
@@ -8,8 +10,11 @@ from urllib.parse import urlparse
 import httpx
 
 from app.core.config import get_settings
+from app.core.utils import clean_string
 
 from .base import BaseConnector, ConnectorConfig, ConnectorConfigurationError, ConnectorMode
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MOCK_BASE_URL = "http://mock-bsale-api:8010/v1"
 DEFAULT_REAL_BASE_URL = "https://api.bsale.io/v1"
@@ -62,6 +67,7 @@ class BsaleConnector(BaseConnector):
     ) -> list[dict[str, Any]]:
         collected: list[dict[str, Any]] = []
         offset = 0
+        t0 = time.monotonic()
         while True:
             page_params = dict(params or {})
             page_params.update({"limit": str(page_size), "offset": str(offset)})
@@ -72,6 +78,8 @@ class BsaleConnector(BaseConnector):
             if len(items) < page_size:
                 break
             offset += len(items)
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        logger.info("fetched %d records from %s in %dms", len(collected), endpoint, elapsed_ms)
         return collected
 
     @staticmethod
@@ -210,12 +218,7 @@ class BsaleConnector(BaseConnector):
         return await self._fetch_paginated("document_types.json")
 
 
-def _clean(value: str | None) -> str | None:
-    if value is None:
-        return None
-    candidate = value.strip()
-    return candidate or None
-
+_clean = clean_string
 
 
 def _normalize_base_url(value: str | None) -> str | None:

@@ -6,9 +6,10 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import delete, desc, select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import ConnectorError, NormalizationError, PersistenceError
 from app.models import (
     IntegrationConnection,
     IntegrationError,
@@ -41,12 +42,14 @@ class IngestionService:
         return list(self.db.scalars(stmt.order_by(IntegrationJob.id)).all())
 
     def list_runs(self, limit: int = 30, tenant_id: int | None = None) -> list[IntegrationJobRun]:
+        from sqlalchemy import desc
         stmt = select(IntegrationJobRun)
         if tenant_id is not None:
             stmt = stmt.join(IntegrationJob, IntegrationJob.id == IntegrationJobRun.job_id).where(IntegrationJob.tenant_id == tenant_id)
         return list(self.db.scalars(stmt.order_by(desc(IntegrationJobRun.id)).limit(limit)).all())
 
     def list_errors(self, limit: int = 30, tenant_id: int | None = None) -> list[IntegrationError]:
+        from sqlalchemy import desc
         stmt = select(IntegrationError)
         if tenant_id is not None:
             stmt = stmt.where(IntegrationError.tenant_id == tenant_id)
@@ -76,61 +79,74 @@ class IngestionService:
         run.started_at = datetime.utcnow()
         self.db.commit()
 
+        connection = None
         try:
             connection = self.db.get(IntegrationConnection, job.connection_id)
             provider = provider_registry.get(connection.provider)
-            connector = provider.build_runtime_connector(self.db, connection, secret_store=get_secret_store())
 
-            if job_type == "sync_product_catalog":
+            try:
+                connector = provider.build_runtime_connector(self.db, connection, secret_store=get_secret_store())
+            except Exception as exc:
+                raise ConnectorError(f"Failed to build connector: {exc}") from exc
+
+            try:
                 records = await provider.fetch_records(connector, job_type)
-                run.records_raw = len(records)
-                run.records_normalized = self._persist_products(tenant_id, run.id, records, provider=provider)
-            elif job_type == "sync_locations":
-                records = await provider.fetch_records(connector, job_type)
-                run.records_raw = len(records)
-                run.records_normalized = self._persist_locations(tenant_id, run.id, records, provider=provider)
-            elif job_type == "sync_stock":
-                records = await provider.fetch_records(connector, job_type)
-                run.records_raw = len(records)
-                run.records_normalized = self._persist_inventory(tenant_id, run.id, records, provider=provider)
-            elif job_type == "sync_sales_orders":
-                records = await provider.fetch_records(connector, job_type)
-                run.records_raw = len(records)
-                run.records_normalized = self._persist_sales_orders(tenant_id, run.id, records, provider=provider)
-            elif job_type in ("sync_customers", "sync_document_types"):
-                # Raw-only jobs: data is stored as raw objects but has no canonical table.
-                records = await provider.fetch_records(connector, job_type)
-                run.records_raw = len(records)
-                for rec in records:
-                    self._persist_raw(tenant_id, run.id, provider.source_system(), provider.source_endpoint_for_job(job_type), rec)
-                self.db.commit()
-                run.records_normalized = 0
-            else:
-                raise ValueError(f"unsupported job type {job_type}")
+            except ConnectorError:
+                raise
+            except Exception as exc:
+                raise ConnectorError(f"Failed to fetch records for {job_type}: {exc}") from exc
+
+            run.records_raw = len(records)
+
+            try:
+                if job_type == "sync_product_catalog":
+                    run.records_normalized = self._persist_products(tenant_id, run.id, records, provider=provider)
+                elif job_type == "sync_locations":
+                    run.records_normalized = self._persist_locations(tenant_id, run.id, records, provider=provider)
+                elif job_type == "sync_stock":
+                    run.records_normalized = self._persist_inventory(tenant_id, run.id, records, provider=provider)
+                elif job_type == "sync_sales_orders":
+                    run.records_normalized = self._persist_sales_orders(tenant_id, run.id, records, provider=provider)
+                elif job_type in ("sync_customers", "sync_document_types"):
+                    for rec in records:
+                        self._persist_raw(tenant_id, run.id, provider.source_system(), provider.source_endpoint_for_job(job_type), rec)
+                    self.db.commit()
+                    run.records_normalized = 0
+                else:
+                    raise ValueError(f"unsupported job type {job_type}")
+            except (ConnectorError, NormalizationError, PersistenceError, ValueError):
+                raise
+            except Exception as exc:
+                raise PersistenceError(f"Failed to persist {job_type}: {exc}") from exc
 
             run.status = "success"
             run.finished_at = datetime.utcnow()
             self.db.commit()
+
         except Exception as exc:
             self.db.rollback()
             run = self.db.get(IntegrationJobRun, run_id)
             if run:
                 run.status = "failed"
                 run.finished_at = datetime.utcnow()
+
+            error_type = type(exc).__name__
             self.db.add(
                 IntegrationError(
                     tenant_id=tenant_id,
                     job_run_id=run_id,
                     object_name=job_type,
-                    message=str(exc),
+                    severity="error",
+                    message=f"[{error_type}] {exc}",
                     payload={
                         "connection_id": job.connection_id,
-                        "provider": connection.provider if "connection" in locals() and connection is not None else None,
+                        "provider": connection.provider if connection is not None else None,
+                        "error_type": error_type,
                     },
                 )
             )
             self.db.commit()
-            logger.exception("job failed", extra={"run_id": run_id})
+            logger.exception("job failed", extra={"run_id": run_id, "error_type": error_type})
 
     # ------------------------------------------------------------------
     # Raw & outbox helpers
@@ -176,33 +192,16 @@ class IngestionService:
         return value
 
     # ------------------------------------------------------------------
-    # FK resolution helpers
+    # Generic FK resolution (consolidates _resolve_product_id,
+    # _resolve_variant_id, _resolve_location_id)
     # ------------------------------------------------------------------
 
-    def _resolve_product_id(self, tenant_id: int, source_system: str, external_id: str) -> int | None:
+    def _resolve_entity_id(self, model, tenant_id: int, source_system: str, external_id: str) -> int | None:
         return self.db.scalar(
-            select(Product.id).where(
-                Product.tenant_id == tenant_id,
-                Product.source_system == source_system,
-                Product.external_id == external_id,
-            )
-        )
-
-    def _resolve_variant_id(self, tenant_id: int, source_system: str, external_id: str) -> int | None:
-        return self.db.scalar(
-            select(Variant.id).where(
-                Variant.tenant_id == tenant_id,
-                Variant.source_system == source_system,
-                Variant.external_id == external_id,
-            )
-        )
-
-    def _resolve_location_id(self, tenant_id: int, source_system: str, external_id: str) -> int | None:
-        return self.db.scalar(
-            select(Location.id).where(
-                Location.tenant_id == tenant_id,
-                Location.source_system == source_system,
-                Location.external_id == external_id,
+            select(model.id).where(
+                model.tenant_id == tenant_id,
+                model.source_system == source_system,
+                model.external_id == external_id,
             )
         )
 
@@ -278,9 +277,8 @@ class IngestionService:
             self._persist_raw(tenant_id, run_id, source_system, provider.source_endpoint_for_job("sync_stock"), clean_rec)
             n = provider.normalize("sync_stock", rec)
 
-            # Try to resolve FKs to canonical Variant and Location
-            n["variant_id"] = self._resolve_variant_id(tenant_id, source_system, n["variant_external_id"])
-            n["location_id"] = self._resolve_location_id(tenant_id, source_system, n["location_external_id"])
+            n["variant_id"] = self._resolve_entity_id(Variant, tenant_id, source_system, n["variant_external_id"])
+            n["location_id"] = self._resolve_entity_id(Location, tenant_id, source_system, n["location_external_id"])
 
             existing = self.db.scalar(
                 select(Stock).where(
@@ -311,10 +309,10 @@ class IngestionService:
             self._persist_raw(tenant_id, run_id, source_system, endpoint, clean_rec)
             normalized = provider.normalize(job_type, rec)
             for movement in normalized.get("movements", []):
-                movement["variant_id"] = self._resolve_variant_id(tenant_id, source_system, movement["variant_external_id"])
+                movement["variant_id"] = self._resolve_entity_id(Variant, tenant_id, source_system, movement["variant_external_id"])
                 location_ext = movement.get("location_external_id")
                 movement["location_id"] = (
-                    self._resolve_location_id(tenant_id, source_system, location_ext) if location_ext else None
+                    self._resolve_entity_id(Location, tenant_id, source_system, location_ext) if location_ext else None
                 )
 
                 existing = self.db.scalar(
@@ -368,10 +366,9 @@ class IngestionService:
             n = provider.normalize("sync_sales_orders", rec)
             lines = n.pop("lines", [])
 
-            # Resolve location FK
             location_ext_id = n.pop("location_external_id", None)
             n["location_external_id"] = location_ext_id
-            n["location_id"] = self._resolve_location_id(tenant_id, source_system, location_ext_id) if location_ext_id else None
+            n["location_id"] = self._resolve_entity_id(Location, tenant_id, source_system, location_ext_id) if location_ext_id else None
 
             existing = self.db.scalar(
                 select(SalesOrder).where(
@@ -386,13 +383,13 @@ class IngestionService:
                     setattr(existing, k, v)
                 existing.lines.clear()
                 for line in lines:
-                    line["variant_id"] = self._resolve_variant_id(tenant_id, source_system, line["variant_external_id"])
+                    line["variant_id"] = self._resolve_entity_id(Variant, tenant_id, source_system, line["variant_external_id"])
                     existing.lines.append(SalesOrderLine(**line))
                 order = existing
             else:
                 order = SalesOrder(tenant_id=tenant_id, **n)
                 for line in lines:
-                    line["variant_id"] = self._resolve_variant_id(tenant_id, source_system, line["variant_external_id"])
+                    line["variant_id"] = self._resolve_entity_id(Variant, tenant_id, source_system, line["variant_external_id"])
                     order.lines.append(SalesOrderLine(**line))
                 self.db.add(order)
                 self.db.flush()

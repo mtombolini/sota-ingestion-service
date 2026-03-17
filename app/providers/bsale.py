@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.connectors.base import ConnectionStatus, ConnectorConfig, ConnectorConfigurationError, ConnectorMode
+from app.core.utils import clean_string
 from app.connectors.bsale import (
     attempt_bsale_connection,
     build_bsale_config,
@@ -243,8 +244,7 @@ class BsaleProvider(ProviderDefinition):
     def _clean(value: Any) -> str | None:
         if value is None:
             return None
-        candidate = str(value).strip()
-        return candidate or None
+        return clean_string(str(value))
 
     @classmethod
     def _clean_base_url(cls, value: Any) -> str | None:

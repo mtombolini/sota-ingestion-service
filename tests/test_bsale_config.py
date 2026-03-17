@@ -1,7 +1,8 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.api.routes import _jobs_for_connection, _reconcile_jobs_for_connections, get_run_detail
+from app.api.helpers import jobs_for_connection as _jobs_for_connection, reconcile_jobs_for_connections as _reconcile_jobs_for_connections
+from app.api.routes.jobs import get_run_detail
 from app.connectors.base import ConnectorMode
 from app.connectors.bsale import build_bsale_config
 from app.models import Base, IntegrationConnection, IntegrationError, IntegrationJob, IntegrationJobRun, IntegrationRawObject, Tenant

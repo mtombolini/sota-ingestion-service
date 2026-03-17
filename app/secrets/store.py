@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.utils import clean_string
 from app.models import IntegrationSecret
 
 _SECRET_PREFIX = "secret://local/"
@@ -88,10 +89,7 @@ class LocalEncryptedSecretStore(SecretStore):
 
     @staticmethod
     def _clean(value: str | None) -> str | None:
-        if value is None:
-            return None
-        candidate = value.strip()
-        return candidate or None
+        return clean_string(value)
 
     def _secret_for_ref(self, db: Session, ref: str | None) -> IntegrationSecret | None:
         normalized = self._clean(ref)
